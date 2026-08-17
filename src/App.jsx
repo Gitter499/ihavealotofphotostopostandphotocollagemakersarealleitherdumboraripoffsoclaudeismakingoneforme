@@ -13,6 +13,7 @@ import { averageColor, ambientFrom } from './lib/colors.js'
 import { LOOKS, matrixFor, applyMatrix, filteredBitmap } from './lib/filters.js'
 import { fireConfetti } from './lib/confetti.js'
 import { exportAllAsZip, renderSlideBlob, slideFileName, saveBlob } from './lib/exportZip.js'
+import { remixPlan } from './lib/remix.js'
 import { randomSeed } from './lib/rng.js'
 import SlideCanvas from './components/SlideCanvas.jsx'
 import Logo from './components/Logo.jsx'
@@ -283,9 +284,26 @@ export default function App() {
   const shuffleSlide = (i) => {
     setSlides((prev) => prev.map((s, j) => (j === i ? { ...s, seed: randomSeed(), swaps: [] } : s)))
   }
-  const shuffleAll = () => {
-    setSlides((prev) => prev.map((s) => ({ ...s, seed: randomSeed(), swaps: [] })))
+
+  // Remix: rebuild every slide around a fresh pairing idea (colour runs,
+  // light arcs, hero anchors, twins split up…) — never the same lens twice
+  // in a row, so mashing the button keeps finding new arrangements.
+  const lastLens = useRef(null)
+  const [remixNote, setRemixNote] = useState(null)
+  const remixAll = () => {
+    if (photos.size === 0) return
+    const { key, label, groups } = remixPlan([...photos.values()], (id) => photos.get(id), {
+      avoid: lastLens.current,
+    })
+    lastLens.current = key
+    setSlides(groups.map((ids) => ({ key: `s${slideKeyCounter++}`, photoIds: ids, seed: randomSeed() })))
+    setRemixNote({ label, at: randomSeed() })
   }
+  useEffect(() => {
+    if (!remixNote) return
+    const t = setTimeout(() => setRemixNote(null), 2600)
+    return () => clearTimeout(t)
+  }, [remixNote])
 
   // Delete a slide outright — its photos leave the workspace with it.
   const deleteSlide = (i) => {
@@ -521,10 +539,10 @@ export default function App() {
           />
         ))}
       </div>
-      <header className="topbar glass-thick">
+      <header className="topbar">
         <div className="brand">
-          <Logo size={26} />
-          <Wordmark height={21} />
+          <Logo size={40} />
+          <Wordmark height={30} />
         </div>
       </header>
 
@@ -836,6 +854,11 @@ export default function App() {
 
       {hasPhotos && (
         <div className="bottom-cluster">
+          {remixNote && (
+            <div className="remix-toast glass-thin" role="status" key={remixNote.at}>
+              {remixNote.label}
+            </div>
+          )}
           <nav className="dock glass-thick" aria-label="Actions">
             <button
               className="dock-btn"
@@ -848,10 +871,10 @@ export default function App() {
             </button>
             <button
               className="dock-btn"
-              onClick={shuffleAll}
+              onClick={remixAll}
               disabled={busyImporting}
-              aria-label="Shuffle all"
-              title="Shuffle all"
+              aria-label="Remix"
+              title="Remix — regroup every slide with a fresh pairing idea"
             >
               <ShuffleIcon size={22} weight="duotone" />
             </button>
@@ -894,11 +917,50 @@ export default function App() {
 }
 
 // Instagram-style filter picker: a strip of circular bubbles, each showing a
-// real photo from the dump with that look applied. Pop-in, idle bob, and
-// selection scale are pure CSS, all gated behind prefers-reduced-motion.
+// real photo from the dump with that look applied. When nobody's choosing,
+// the strip rests as a slim row of white dots with the filter names beside
+// them; pointing at it (or tapping, on touch) blooms the previews back open.
+// Pop-in, idle bob, and selection scale are pure CSS, gated behind
+// prefers-reduced-motion.
 function FilterBar({ photo, look, setLook }) {
+  const [open, setOpen] = useState(false)
+  const barRef = useRef(null)
+  const closeTimer = useRef(null)
+  const cancelClose = () => {
+    clearTimeout(closeTimer.current)
+    closeTimer.current = null
+  }
+  useEffect(() => cancelClose, [])
+
+  // touch has no hover — a tap anywhere outside the open strip collapses it
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e) => {
+      if (!barRef.current?.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => document.removeEventListener('pointerdown', onDown, true)
+  }, [open])
+
   return (
-    <div className="filterbar glass-thick" role="radiogroup" aria-label="Filter">
+    <div
+      ref={barRef}
+      className={`filterbar glass-thick ${open ? '' : 'collapsed'}`}
+      role="radiogroup"
+      aria-label="Filter"
+      onPointerEnter={(e) => {
+        if (e.pointerType !== 'mouse') return
+        cancelClose()
+        setOpen(true)
+      }}
+      // the unfold relayout makes Chrome emit a phantom leave/enter pair, so
+      // collapsing waits a beat — a real exit survives it, the phantom doesn't
+      onPointerLeave={(e) => {
+        if (e.pointerType !== 'mouse') return
+        cancelClose()
+        closeTimer.current = setTimeout(() => setOpen(false), 140)
+      }}
+    >
       {LOOKS.map((l, i) => (
         <button
           key={l.key}
@@ -907,8 +969,23 @@ function FilterBar({ photo, look, setLook }) {
           aria-checked={look === l.key}
           className={`bubble ${look === l.key ? 'active' : ''}`}
           style={{ '--i': i }}
-          onClick={() => setLook(l.key)}
+          onFocus={() => setOpen(true)}
+          // selection happens on pointerdown — the unfold shifts the strip's
+          // layout mid-gesture, so a down/up pair can straddle two elements
+          // and never produce a click. Touch gets one wake-up tap first.
+          onPointerDown={(e) => {
+            if (e.pointerType === 'touch' && !open) {
+              setOpen(true)
+              return
+            }
+            setLook(l.key)
+          }}
+          // keyboard activation (Enter/Space) arrives as a detail-0 click
+          onClick={(e) => {
+            if (e.detail === 0) setLook(l.key)
+          }}
         >
+          <span className="bubble-dot" aria-hidden="true" />
           <span className="bubble-float">
             <BubbleThumb photo={photo} lookKey={l.key} />
           </span>

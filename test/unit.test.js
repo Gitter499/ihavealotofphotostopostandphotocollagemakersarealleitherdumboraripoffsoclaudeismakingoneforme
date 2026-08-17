@@ -15,6 +15,7 @@ import { matrixFor, applyMatrix } from '../src/lib/filters.js'
 import { tiltAngle } from '../src/lib/render.js'
 import { computeLayout, cropLoss, MAX_CROP_LOSS } from '../src/lib/layout.js'
 import { mulberry32 } from '../src/lib/rng.js'
+import { remixPlan, remixWith, REMIX_LENSES } from '../src/lib/remix.js'
 
 let failures = 0
 function test(name, fn) {
@@ -507,6 +508,72 @@ test('cropLoss math', () => {
   assert.equal(cropLoss(1, 1), 0)
   assert.ok(Math.abs(cropLoss(2, 1) - 0.5) < 1e-9)
   assert.ok(Math.abs(cropLoss(0.5, 1) - 0.5) < 1e-9)
+})
+
+// ---------- remix lenses ----------
+
+const remixDump = (n = 40) => {
+  const map = new Map()
+  for (let i = 0; i < n; i++) {
+    map.set(i + 1, {
+      id: i + 1,
+      name: `img_${i + 1}.jpg`,
+      order: i,
+      date: 1_700_000_000_000 + i * 60_000,
+      aspect: [0.75, 1.33, 1, 0.56, 1.78][i % 5],
+      quality: 0.3 + ((i * 7) % 10) / 20,
+      hue: (i * 37) % 360,
+      sat: 0.1 + ((i * 3) % 8) / 10,
+      luma: ((i * 13) % 20) / 20,
+      hash: [(i * 0x9e3779b9) >>> 0, (i * 0x85ebca6b) >>> 0],
+    })
+  }
+  return map
+}
+
+test('every remix lens keeps every photo exactly once, sizes 1–8, ≤20 slides', () => {
+  const photos = remixDump(40)
+  const list = [...photos.values()]
+  for (const key of REMIX_LENSES) {
+    const groups = remixWith(key, list, (id) => photos.get(id), 7)
+    const flat = groups.flat()
+    assert.equal(flat.length, 40, `${key}: dropped or duplicated photos (${flat.length})`)
+    assert.equal(new Set(flat).size, 40, `${key}: duplicate ids`)
+    assert.ok(groups.length <= 20, `${key}: too many slides`)
+    for (const g of groups) assert.ok(g.length >= 1 && g.length <= 8, `${key}: bad slide size ${g.length}`)
+  }
+})
+
+test('twins lens splits near-duplicates across different slides', () => {
+  const photos = remixDump(24)
+  // three burst clusters of three: identical hashes within each cluster
+  const clusters = [
+    [1, 2, 3],
+    [10, 11, 12],
+    [20, 21, 22],
+  ]
+  clusters.forEach((c, ci) => {
+    for (const id of c) photos.get(id).hash = [0xf0f0f0f0 + ci, 0x0f0f0f0f + ci]
+  })
+  const groups = remixWith('twins', [...photos.values()], (id) => photos.get(id), 3)
+  for (const c of clusters) {
+    for (const g of groups) {
+      const together = c.filter((id) => g.includes(id)).length
+      assert.ok(together <= 1, `twins ${c} share a slide: ${g}`)
+    }
+  }
+})
+
+test('remixPlan never repeats the lens it was told to avoid', () => {
+  const photos = remixDump(30)
+  const list = [...photos.values()]
+  for (const avoid of REMIX_LENSES) {
+    for (let seed = 1; seed <= 12; seed++) {
+      const { key, groups } = remixPlan(list, (id) => photos.get(id), { avoid, seed })
+      assert.notEqual(key, avoid)
+      assert.equal(groups.flat().length, 30)
+    }
+  }
 })
 
 if (failures > 0) {

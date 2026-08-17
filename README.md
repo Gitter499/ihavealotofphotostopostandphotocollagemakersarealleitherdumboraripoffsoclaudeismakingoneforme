@@ -16,7 +16,8 @@ Everything runs in your browser. Photos never leave your device.
 - Slides break at natural time gaps. A standout shot gets a slide to itself.
 - Spots burst duplicates so only the best one gets a big slot.
 - Nudges similar colours onto the same slide.
-- Filters with live preview bubbles, and an Off switch when they miss.
+- Filters with live preview bubbles, and an Off switch when they miss. The strip folds into a dot row when you're not choosing.
+- A Remix button that regroups everything under a different idea each press: colour runs, light arcs, hero shots anchoring slides, lookalikes split apart.
 - Tilt, rounded corners, gutter width, 4:5 or 1:1.
 - Mesh mode: a photo can run across two slides, so the carousel swipes as one continuous strip.
 - Drag photos between slides or within one. Add, delete, reorder slides. Set any slide's photo count.

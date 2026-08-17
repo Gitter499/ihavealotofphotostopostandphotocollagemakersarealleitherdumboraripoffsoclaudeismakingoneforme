@@ -212,6 +212,16 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
   await closeOptions()
 
+  // the filter strip rests as a dot row and blooms open under the pointer
+  assert.equal(await page.locator('.filterbar.collapsed').count(), 1, 'filter strip should rest collapsed')
+  await page.locator('.filterbar').hover()
+  await page.waitForTimeout(400)
+  assert.equal(await page.locator('.filterbar.collapsed').count(), 0, 'pointer over the strip should expand it')
+  await page.mouse.move(10, 10) // leave → folds back to dots
+  await page.waitForTimeout(400)
+  assert.equal(await page.locator('.filterbar.collapsed').count(), 1, 'strip should fold back after the pointer leaves')
+  console.log('  ok  filter strip collapses to dots and expands on hover')
+
   // filter bubble strip: Off must actually change the rendered pixels back
   const bubbleCount = await page.locator('.filterbar .bubble').count()
   assert.ok(bubbleCount >= 7, `expected ≥7 filter bubbles, got ${bubbleCount}`)
@@ -311,6 +321,31 @@ try {
   const afterPlus = await countsOf()
   assert.deepEqual(afterPlus, stepBefore, 'plus should restore the balance')
   console.log('  ok  per-slide − / + steppers rebalance with the neighbour')
+
+  // remix regroups the whole dump under a new lens: photos conserved,
+  // arrangement changed, and a toast names the lens it chose
+  const arrangement = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('.slide-canvas')].map((c) => c.toDataURL()).join('|'),
+    )
+  const preRemix = await arrangement()
+  await page.getByRole('button', { name: 'Remix', exact: true }).click()
+  await page.waitForTimeout(1300)
+  assert.match(await page.locator('.remix-toast').textContent(), /^Remixed/, 'remix should announce its lens')
+  assert.match(await page.locator('.counts').textContent(), /30 photos/, 'remix must not drop photos')
+  assert.notEqual(await arrangement(), preRemix, 'remix did not change the arrangement')
+  // a second press picks a different lens
+  const firstLens = await page.locator('.remix-toast').textContent()
+  await page.getByRole('button', { name: 'Remix', exact: true }).click()
+  await page.waitForTimeout(400)
+  assert.notEqual(await page.locator('.remix-toast').textContent(), firstLens, 'remix repeated the same lens')
+  console.log('  ok  Remix regroups everything under a fresh lens, twice in a row differently')
+  // back to the deterministic 5×6 arrangement for the tests below
+  await openOptions()
+  await page.locator('input[type="range"]').first().fill('5')
+  await page.locator('input[type="range"]').first().fill('6')
+  await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
+  await closeOptions()
 
   // shuffle changes the layout
   const before = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
@@ -459,6 +494,21 @@ try {
   await openOptions()
   await page.locator('[aria-label="Mesh slides"]').getByRole('button', { name: 'Off' }).click()
   await closeOptions()
+
+  // phone width: the stats chip must sit clear of the dock, not under it
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.waitForTimeout(400)
+  const statsBox = await page.locator('.stats-corner').boundingBox()
+  const dockBox = await page.locator('.dock').boundingBox()
+  const overlap =
+    statsBox.x < dockBox.x + dockBox.width &&
+    statsBox.x + statsBox.width > dockBox.x &&
+    statsBox.y < dockBox.y + dockBox.height &&
+    statsBox.y + statsBox.height > dockBox.y
+  assert.ok(!overlap, `stats chip overlaps the dock on mobile (${JSON.stringify({ statsBox, dockBox })})`)
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await page.waitForTimeout(300)
+  console.log('  ok  stats chip clears the dock at phone width')
 
   // 200-photo stress: import must complete and stay responsive
   const many = []

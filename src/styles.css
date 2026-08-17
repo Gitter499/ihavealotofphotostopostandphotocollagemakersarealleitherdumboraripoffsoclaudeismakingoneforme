@@ -214,17 +214,11 @@ body {
 
 /* ---------- navigation bar ---------- */
 
+/* the brand floats free on the page — no pill, just the mark itself */
 .topbar {
-  position: sticky;
-  top: calc(var(--space-2) + env(safe-area-inset-top));
-  z-index: 40;
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-height: 52px;
-  margin: calc(var(--space-2) + env(safe-area-inset-top)) auto var(--space-4);
-  padding: var(--space-2) var(--space-5);
-  border-radius: var(--radius-full);
+  justify-content: center;
+  margin: calc(var(--space-5) + env(safe-area-inset-top)) auto var(--space-5);
   width: fit-content;
   max-width: 100%;
 }
@@ -232,8 +226,9 @@ body {
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   white-space: nowrap;
+  filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.55));
 }
 
 .brand svg[role='img'] {
@@ -314,7 +309,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 5px;
+  gap: 0; /* spacing via margins so the zero-size dot/thumb never adds phantom gaps */
   padding: 2px 4px;
   cursor: pointer;
   flex: 0 0 auto;
@@ -352,6 +347,11 @@ body {
   font-weight: 550;
   color: var(--label-secondary);
   letter-spacing: 0.02em;
+  margin-top: 5px;
+}
+
+.filterbar.collapsed .bubble-label {
+  margin-top: 0;
 }
 
 .bubble.active .bubble-label {
@@ -360,6 +360,66 @@ body {
 
 .bubble-float {
   display: block;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  border-radius: 50%;
+  transition:
+    width 300ms var(--ease-spring),
+    height 300ms var(--ease-spring),
+    opacity 200ms var(--ease-out),
+    transform 300ms var(--ease-spring);
+}
+
+/* resting state: the strip folds into a slim row of dots and names */
+.bubble-dot {
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  opacity: 0;
+  flex: 0 0 auto;
+  transition:
+    width 300ms var(--ease-spring),
+    height 300ms var(--ease-spring),
+    opacity 200ms var(--ease-out),
+    background-color 200ms var(--ease-out),
+    box-shadow 200ms var(--ease-out);
+}
+
+.filterbar.collapsed {
+  align-items: center;
+  padding: 8px 16px;
+}
+
+.filterbar.collapsed .bubble {
+  flex-direction: row;
+  gap: 0;
+  padding: 6px 7px;
+}
+
+.filterbar.collapsed .bubble-float {
+  width: 0;
+  height: 0;
+  opacity: 0;
+  transform: scale(0.3);
+}
+
+.filterbar.collapsed .bubble-dot {
+  width: 8px;
+  height: 8px;
+  opacity: 1;
+  margin-right: 7px;
+}
+
+.filterbar.collapsed .bubble.active .bubble-dot {
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.22);
+}
+
+.filterbar.collapsed .bubble.active .bubble-thumb {
+  transform: none;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -378,6 +438,34 @@ body {
   .filterbar:focus-within .bubble-float {
     animation-play-state: paused;
   }
+
+  /* dots don't bob — the fold/unfold transition owns the motion here */
+  .filterbar.collapsed .bubble-float {
+    animation: none;
+  }
+
+  .remix-toast {
+    animation: toast-pop 320ms var(--ease-spring) backwards;
+  }
+}
+
+@keyframes toast-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
+  }
+}
+
+/* which lens the Remix landed on — a passing note above the dock */
+.remix-toast {
+  padding: 7px 14px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-caption1);
+  color: var(--label-primary);
+  white-space: nowrap;
+  max-width: calc(100vw - var(--space-6));
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @keyframes bubble-in {
@@ -1063,9 +1151,12 @@ input[type='range']::-moz-range-thumb {
   }
 
   .topbar {
-    width: 100%;
-    justify-content: space-between;
-    padding: var(--space-2) var(--space-4);
+    margin-top: calc(var(--space-4) + env(safe-area-inset-top));
+  }
+
+  /* keep the tally clear of the dock, which owns the bottom edge on phones */
+  .stats-corner {
+    bottom: calc(92px + env(safe-area-inset-bottom));
   }
 
   input[type='range'] {
