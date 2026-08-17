@@ -16,6 +16,15 @@ import { exportAllAsZip, renderSlideBlob, slideFileName, saveBlob } from './lib/
 import { randomSeed } from './lib/rng.js'
 import SlideCanvas from './components/SlideCanvas.jsx'
 import Logo from './components/Logo.jsx'
+import {
+  ImagesIcon,
+  ShuffleIcon,
+  FadersHorizontalIcon,
+  DownloadSimpleIcon,
+  PlusIcon,
+  MinusIcon,
+  TrashIcon,
+} from '@phosphor-icons/react'
 
 const BG_SWATCHES = [
   { key: 'dark', color: '#0d0d0d', label: 'Near-black' },
@@ -573,7 +582,7 @@ export default function App() {
                       aria-label="Fewer photos on this slide"
                       title="Move a photo to a neighbouring slide"
                     >
-                      <Glyph d="M3.5 8h9" />
+                      <MinusIcon size={14} weight="bold" />
                     </button>
                     {slide.photoIds.length} {slide.photoIds.length === 1 ? 'photo' : 'photos'}
                     <button
@@ -583,7 +592,7 @@ export default function App() {
                       aria-label="More photos on this slide"
                       title="Pull a photo from a neighbouring slide"
                     >
-                      <Glyph d="M8 3.5v9M3.5 8h9" />
+                      <PlusIcon size={14} weight="bold" />
                     </button>
                   </span>
                   <span className="slide-actions">
@@ -594,7 +603,7 @@ export default function App() {
                       aria-label="Shuffle this slide"
                       title="Shuffle this slide"
                     >
-                      <Glyph d="M2 4.5h2.6l6.8 7H14M2 11.5h2.6l1.7-1.75M9.7 6.25l1.7-1.75H14M12 2.5l2 2-2 2M12 9.5l2 2-2 2" />
+                      <ShuffleIcon size={16} weight="duotone" />
                     </button>
                     <button
                       className="icon-btn"
@@ -603,7 +612,7 @@ export default function App() {
                       aria-label="Download this slide"
                       title="Download this slide"
                     >
-                      <Glyph d="M8 2.5v7.5m0 0 3-3m-3 3-3-3M3 13.5h10" />
+                      <DownloadSimpleIcon size={16} weight="duotone" />
                     </button>
                     <button
                       className="icon-btn icon-btn-danger"
@@ -611,7 +620,7 @@ export default function App() {
                       aria-label="Delete this slide"
                       title="Delete this slide (removes its photos)"
                     >
-                      <Glyph d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+                      <TrashIcon size={16} weight="duotone" />
                     </button>
                   </span>
                 </div>
@@ -735,7 +744,7 @@ export default function App() {
               aria-label="Add photos"
               title="Add photos"
             >
-              <Glyph size={19} d="M8 2.5v11M2.5 8h11" />
+              <ImagesIcon size={22} weight="duotone" />
             </button>
             <button
               className="dock-btn"
@@ -744,7 +753,7 @@ export default function App() {
               aria-label="Shuffle all"
               title="Shuffle all"
             >
-              <Glyph size={19} d="M2 4.5h2.6l6.8 7H14M2 11.5h2.6l1.7-1.75M9.7 6.25l1.7-1.75H14M12 2.5l2 2-2 2M12 9.5l2 2-2 2" />
+              <ShuffleIcon size={22} weight="duotone" />
             </button>
             <button
               className={`dock-btn ${optionsOpen ? 'dock-btn-active' : ''}`}
@@ -753,7 +762,7 @@ export default function App() {
               aria-label="Options"
               title="Options"
             >
-              <Glyph size={19} d="M2.5 5h6M11.5 5h2M2.5 11h2M7.5 11h6M9.5 3v4M4.5 9v4" />
+              <FadersHorizontalIcon size={22} weight="duotone" />
             </button>
             <button
               className="dock-btn dock-btn-primary dock-btn-wide"
@@ -770,7 +779,7 @@ export default function App() {
                 </span>
               ) : (
                 <>
-                  <Glyph size={17} d="M8 2.5v7.5m0 0 3-3m-3 3-3-3M3 13.5h10" />
+                  <DownloadSimpleIcon size={18} weight="bold" />
                   <span>Download all</span>
                 </>
               )}
@@ -836,25 +845,6 @@ function BubbleThumb({ photo, lookKey }) {
     }
   }, [photo, lookKey])
   return <canvas ref={ref} className="bubble-thumb" aria-hidden="true" />
-}
-
-// One icon voice: 16px grid, 1.8 stroke, round caps — no mixed glyph sets.
-function Glyph({ d, size = 16 }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d={d} />
-    </svg>
-  )
 }
 
 function DragGhost({ drag, photo }) {
