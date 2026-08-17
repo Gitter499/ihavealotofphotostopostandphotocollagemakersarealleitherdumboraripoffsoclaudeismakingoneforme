@@ -58,6 +58,23 @@ const BG_SWATCHES = [
 let slideKeyCounter = 1
 let textKeyCounter = 1
 const EMPTY_TEXTS = [] // stable ref so canvases without text don't re-render
+const FREEFORM = 'freeform' // sentinel template id: scrapbook absolute placement
+
+// Deterministic scrapbook lean per photo (±7°) — survives drags and reloads.
+const tossRot = (id) => ((((id * 2654435761) >>> 9) % 1000) / 1000 - 0.5) * 0.24
+
+// Seeded starting spot for a freeform photo that hasn't been placed yet:
+// a loose grid with jitter, so a fresh freeform slide reads as a hand toss.
+const autoToss = (j, seed, n) => {
+  const h = ((seed + j * 2654435761) ^ (j << 7)) >>> 0
+  const rnd = (k) => ((h >>> k) & 1023) / 1023
+  const cols = Math.max(1, Math.ceil(Math.sqrt(n)))
+  const rows = Math.max(1, Math.ceil(n / cols))
+  return {
+    x: ((j % cols) + 0.5) / cols * 0.82 + 0.09 + (rnd(0) - 0.5) * 0.12,
+    y: (Math.floor(j / cols) + 0.5) / rows * 0.78 + 0.11 + (rnd(5) - 0.5) * 0.1,
+  }
+}
 
 // Phone-width detection: below this, floating popovers become bottom sheets
 // in the thumb zone and per-slide actions collapse behind one ⋯ button.
@@ -106,6 +123,7 @@ export default function App() {
   const [captions, setCaptions] = useState(() => new Map()) // slideKey → {text, pos}
   const [capEdit, setCapEdit] = useState(null) // {slideKey, x, y} — caption editor
   const [textBoxes, setTextBoxes] = useState(() => new Map()) // slideKey → [{id, text, x, y, size, color, curve}]
+  const [freeformPos, setFreeformPos] = useState(() => new Map()) // photoId → {x, y} on a freeform slide
   const [textEdit, setTextEdit] = useState(null) // {slideKey, textId, x, y} — text box editor
   const [moreEdit, setMoreEdit] = useState(null) // {slideKey} — mobile ⋯ action sheet
   const [showHints, setShowHints] = useState(false) // first-run coach marks
@@ -256,6 +274,7 @@ export default function App() {
           if (m) textKeyCounter = Math.max(textKeyCounter, Number(m[1]) + 1)
         }
       setTextBoxes(restoredTexts)
+      setFreeformPos(new Map(workspace.freeformPos ?? []))
       setImportState(null)
       setRestoring(false)
     })()
@@ -291,11 +310,12 @@ export default function App() {
         slideTemplates: [...slideTemplates],
         captions: [...captions],
         textBoxes: [...textBoxes],
+        freeformPos: [...freeformPos],
         savedAt: Date.now(),
       })
     }, 800)
     return () => clearTimeout(t)
-  }, [restoring, photos, slides, tray, perSlide, gutter, bgMode, look, tilt, cornerRadius, aspect, customAspect, borderW, borderColor, borderStyle, lookStrength, exportFormat, exportSize, meshSeams, sizeBoosts, slideTemplates, captions, textBoxes])
+  }, [restoring, photos, slides, tray, perSlide, gutter, bgMode, look, tilt, cornerRadius, aspect, customAspect, borderW, borderColor, borderStyle, lookStrength, exportFormat, exportSize, meshSeams, sizeBoosts, slideTemplates, captions, textBoxes, freeformPos])
 
   // Per-photo pan: nudge the crop's focal point inside its cell. The photo
   // object carries the new focal (so previews, exports, and the stored
@@ -435,6 +455,14 @@ export default function App() {
     const texts = textBoxes.get(orig.key)
     if (texts?.length)
       setTextBoxes((prev) => new Map(prev).set(copy.key, texts.map((t) => ({ ...t, id: `t${textKeyCounter++}` }))))
+    setFreeformPos((prev) => {
+      const next = new Map(prev)
+      orig.photoIds.forEach((id, j) => {
+        const pos = prev.get(id)
+        if (pos) next.set(clones[j].id, { ...pos })
+      })
+      return next
+    })
   }
 
   // Start over: wipe the stored session and the workspace together.
@@ -451,6 +479,7 @@ export default function App() {
     setSlideTemplates(new Map())
     setCaptions(new Map())
     setTextBoxes(new Map())
+    setFreeformPos(new Map())
     setNotice(null)
     setSkipped([])
     setOptionsOpen(false)
@@ -539,6 +568,8 @@ export default function App() {
         end < slides.length - 1 &&
         slides[end].photoIds.length > 0 &&
         slides[end + 1].photoIds.length > 0 &&
+        slideTemplates.get(slides[end].key) !== FREEFORM &&
+        slideTemplates.get(slides[end + 1].key) !== FREEFORM &&
         meshSeams.has(`${slides[end].key}|${slides[end + 1].key}`)
       )
         end++
@@ -546,7 +577,7 @@ export default function App() {
       i = end + 1
     }
     return groups
-  }, [slides, meshSeams])
+  }, [slides, meshSeams, slideTemplates])
 
   const layoutCache = useRef(new Map())
   const layouts = useMemo(() => {
@@ -563,7 +594,9 @@ export default function App() {
       const quals = allIds.map((id) => eff.get(id) ?? 0.5)
       // a pinned template wins over the BSP engine on a solo slide — merged
       // groups always compose freely across the full width
-      const tpl = n === 1 ? templateById(slideTemplates.get(members[0].key)) : null
+      const pinned = n === 1 ? slideTemplates.get(members[0].key) : null
+      const isFree = pinned === FREEFORM
+      const tpl = pinned && !isFree ? templateById(pinned) : null
       const usingTpl = tpl && tpl.count === allIds.length
       const seed = members.reduce((a, s) => (Math.imul(a, 31) + s.seed) >>> 0, 17)
       const opts = {
@@ -579,12 +612,27 @@ export default function App() {
       // the group that actually changed
       const cacheKey = JSON.stringify([
         members.map((s) => s.key), allIds, boosts, quals, groupW, canvasH, margin, gutter, seed, usingTpl && tpl.id,
+        isFree && allIds.map((id) => freeformPos.get(id) ?? null),
       ])
       const inner =
         layoutCache.current.get(cacheKey) ??
-        (usingTpl
-          ? { rects: templateRects(tpl, { canvasW: groupW, canvasH, margin, gutter }), seed }
-          : computeLayout(allIds.map((id) => photos.get(id)?.aspect ?? 1), opts))
+        (isFree
+          ? {
+              // scrapbook: every photo is a tossed polaroid at its own spot;
+              // stored drag positions win over the seeded auto-toss
+              rects: allIds.map((id, j) => {
+                const pos = freeformPos.get(id) ?? autoToss(j, seed, allIds.length)
+                const a = photos.get(id)?.aspect ?? 1
+                const base = canvasW * 0.4 * (sizeBoosts.get(id) ?? 1)
+                const w = Math.min(canvasW * 0.9, base)
+                const h = Math.min(canvasH * 0.9, w / a)
+                return { x: pos.x * canvasW - w / 2, y: pos.y * canvasH - h / 2, w, h, rot: tossRot(id), frame: true }
+              }),
+              seed,
+            }
+          : usingTpl
+            ? { rects: templateRects(tpl, { canvasW: groupW, canvasH, margin, gutter }), seed }
+            : computeLayout(allIds.map((id) => photos.get(id)?.aspect ?? 1), opts))
       nextCache.set(cacheKey, inner)
       // user-dragged reorders: the two photos' rects trade places
       const groupRects = allIds.map((_, j) => inner.rects[j] ?? null)
@@ -626,7 +674,7 @@ export default function App() {
     }
     layoutCache.current = nextCache
     return result
-  }, [slides, photos, canvasW, canvasH, margin, gutter, meshGroups, sizeBoosts, slideTemplates])
+  }, [slides, photos, canvasW, canvasH, margin, gutter, meshGroups, sizeBoosts, slideTemplates, freeformPos])
 
   const toggleSeam = (i) => {
     const key = seamKey(i)
@@ -726,6 +774,14 @@ export default function App() {
 
   const shuffleSlide = (i) => {
     pushHistory()
+    if (slideTemplates.get(slides[i]?.key) === FREEFORM) {
+      const ids = new Set(slides[i].photoIds)
+      setFreeformPos((prev) => {
+        const next = new Map(prev)
+        for (const id of ids) next.delete(id)
+        return next
+      })
+    }
     // shuffling always shows something new — a pinned template unpins first
     const key = slides[i]?.key
     setSlideTemplates((prev) => {
@@ -950,7 +1006,7 @@ export default function App() {
   // objects are treated as immutable (edits like nudges replace them), so a
   // snapshot is a handful of container copies, not a deep clone.
   const stateRef = useRef(null)
-  stateRef.current = { photos, slides, tray, meshSeams, sizeBoosts, slideTemplates, captions, textBoxes }
+  stateRef.current = { photos, slides, tray, meshSeams, sizeBoosts, slideTemplates, captions, textBoxes, freeformPos }
   const history = useRef({ past: [], future: [], lastTag: '', lastAt: 0 })
   const [historyTick, setHistoryTick] = useState(0)
 
@@ -963,6 +1019,7 @@ export default function App() {
     slideTemplates: new Map(stateRef.current.slideTemplates),
     captions: new Map(stateRef.current.captions),
     textBoxes: new Map(stateRef.current.textBoxes),
+    freeformPos: new Map(stateRef.current.freeformPos),
   })
 
   // call BEFORE mutating; same-tag pushes within a second coalesce, so a
@@ -1000,6 +1057,7 @@ export default function App() {
     setSlideTemplates(s.slideTemplates)
     setCaptions(s.captions)
     setTextBoxes(s.textBoxes)
+    setFreeformPos(s.freeformPos)
   }
 
   const undo = () => {
@@ -1078,6 +1136,44 @@ export default function App() {
   // ---- photo drag between slides (pointer-based, works with touch) ----
   const startPhotoDrag = (e, slideKey, photoId) => {
     if (drag || exportState) return
+    // Freeform slides are scrapbooks: dragging moves the photo absolutely on
+    // its own canvas (like a text box) instead of relocating it. "To shelf"
+    // in the tap popover and the steppers still move photos out.
+    const freeOwner = slidesRef.current.find((s) => s.photoIds.includes(photoId))
+    if (freeOwner && slideTemplates.get(freeOwner.key) === FREEFORM && !trayRef.current.includes(photoId)) {
+      const box = e.target.getBoundingClientRect?.()
+      if (box) {
+        const start = { x: e.clientX, y: e.clientY }
+        let moved = false
+        const onMove = (ev) => {
+          if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 6) return
+          if (!moved) {
+            moved = true
+            document.body.dataset.dragging = '1'
+            haptics.pickup()
+            setSizeEdit(null)
+          }
+          pushHistory(`fmove:${photoId}`)
+          const x = Math.min(0.96, Math.max(0.04, (ev.clientX - box.left) / box.width))
+          const y = Math.min(0.96, Math.max(0.04, (ev.clientY - box.top) / box.height))
+          setFreeformPos((prev) => new Map(prev).set(photoId, { x, y }))
+        }
+        const onUp = (ev) => {
+          cleanupFree()
+          if (!moved) setSizeEdit({ photoId, x: ev.clientX, y: ev.clientY })
+        }
+        const cleanupFree = () => {
+          delete document.body.dataset.dragging
+          window.removeEventListener('pointermove', onMove)
+          window.removeEventListener('pointerup', onUp)
+          window.removeEventListener('pointercancel', cleanupFree)
+        }
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+        window.addEventListener('pointercancel', cleanupFree)
+        return
+      }
+    }
     const start = { x: e.clientX, y: e.clientY }
     const isTouch = e.pointerType === 'touch'
     let active = false
@@ -1555,6 +1651,8 @@ export default function App() {
                 {i > 0 &&
                   slide.photoIds.length > 0 &&
                   slides[i - 1].photoIds.length > 0 &&
+                  slideTemplates.get(slide.key) !== FREEFORM &&
+                  slideTemplates.get(slides[i - 1].key) !== FREEFORM &&
                   (() => {
                     const meshed = meshSeams.has(seamKey(i - 1))
                     const Icon = meshed ? LinkSimpleIcon : LinkBreakIcon
@@ -1965,6 +2063,19 @@ export default function App() {
             >
               <span className="tpl-preview tpl-auto">✳︎</span>
               <span className="tpl-name">Auto</span>
+            </button>
+            <button
+              data-template="freeform"
+              className={`tpl-option ${slideTemplates.get(tplEdit.slideKey) === FREEFORM ? 'active' : ''}`}
+              title="Scrapbook: polaroids you drag anywhere on the slide"
+              onClick={() => {
+                pushHistory()
+                haptics.select()
+                setSlideTemplates((prev) => new Map(prev).set(tplEdit.slideKey, FREEFORM))
+              }}
+            >
+              <span className="tpl-preview tpl-auto">✋</span>
+              <span className="tpl-name">Freeform</span>
             </button>
             {templatesFor(tplEdit.count).map((t) => (
               <button

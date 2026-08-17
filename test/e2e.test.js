@@ -754,7 +754,8 @@ try {
   await page.locator('[aria-label="Layout template"]').first().click()
   await page.waitForTimeout(300)
   assert.ok((await page.locator('.tpl-option').count()) >= 3, 'template picker should offer Auto plus classics')
-  await page.locator('[data-template="grid-2x3"]').click()
+  // the slide's count varies with earlier drags — pin whichever classic fits
+  await page.locator('.tpl-option[data-template]:not([data-template="freeform"])').first().click()
   await page.waitForTimeout(900)
   const withTpl = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
   assert.notEqual(withTpl, preTpl, 'pinning a template did not change the layout')
@@ -764,6 +765,41 @@ try {
   await page.keyboard.press('Escape')
   await page.waitForTimeout(200)
   console.log('  ok  layout templates pin and unpin per slide')
+
+  // freeform: the scrapbook template scatters polaroids you drag anywhere
+  const preFree = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  await page.locator('[aria-label="Layout template"]').first().click()
+  await page.waitForTimeout(300)
+  await page.locator('[data-template="freeform"]').click()
+  await page.waitForTimeout(900)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  const freeOn = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  assert.notEqual(freeOn, preFree, 'freeform did not restyle the slide')
+  // drag a polaroid across the canvas — count stays, pixels move
+  const freeCounts = await page.evaluate(() =>
+    [...document.querySelectorAll('.slide-count')].map((el) => parseInt(el.textContent, 10)),
+  )
+  const fc = await page.locator('.slide-canvas').first().boundingBox()
+  await page.mouse.move(fc.x + fc.width * 0.35, fc.y + fc.height * 0.35)
+  await page.mouse.down()
+  await page.mouse.move(fc.x + fc.width * 0.72, fc.y + fc.height * 0.72, { steps: 10 })
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+  const freeMoved = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  assert.notEqual(freeMoved, freeOn, 'dragging a freeform polaroid did not move it')
+  assert.deepEqual(
+    await page.evaluate(() => [...document.querySelectorAll('.slide-count')].map((el) => parseInt(el.textContent, 10))),
+    freeCounts,
+    'freeform drag must not relocate photos between slides',
+  )
+  await page.locator('[aria-label="Layout template"]').first().click()
+  await page.waitForTimeout(300)
+  await page.locator('.tpl-option').first().click() // Auto
+  await page.waitForTimeout(700)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  console.log('  ok  freeform scrapbook: polaroids drag anywhere, stay on their slide')
 
   // caption: typed text lands on the canvas (and would land in the export)
   await page.locator('[aria-label="Caption"]').first().click()

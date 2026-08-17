@@ -309,8 +309,11 @@ export function makeStagger(count, totalMs = 800, durMs = 380) {
 
 export const easeOut = easeOutCubic
 
+// Geometry interpolates; the target's extras (rot, frame) ride along so a
+// morph into a polaroid keeps its mat and lean for every frame.
 export function lerpRect(a, b, t) {
   return {
+    ...b,
     x: a.x + (b.x - a.x) * t,
     y: a.y + (b.y - a.y) * t,
     w: a.w + (b.w - a.w) * t,
