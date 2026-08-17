@@ -261,7 +261,10 @@ export default function App() {
     setOptionsOpen(false)
   }
 
-  // Esc closes the options popover and the size slider.
+  // Keyboard: Esc closes whatever is open; single letters fire the big
+  // actions (guarded so typing in a field never triggers them). The ref
+  // keeps the once-mounted listener pointed at fresh handlers.
+  const keyActions = useRef({})
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') {
@@ -270,6 +273,15 @@ export default function App() {
         setTplEdit(null)
         setCapEdit(null)
         setMoreEdit(null)
+        return
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const tag = e.target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return
+      const fn = keyActions.current[e.key.toLowerCase()]
+      if (fn) {
+        e.preventDefault()
+        fn()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -822,6 +834,20 @@ export default function App() {
   const hasPhotos = photos.size > 0
   const busyImporting = importState != null
 
+  // single-letter shortcuts, hinted in the dock button titles
+  keyActions.current = hasPhotos
+    ? {
+        r: remixAll,
+        d: downloadAll,
+        o: () => setOptionsOpen((o) => !o),
+        f: () => {
+          const order = LOOKS.map((l) => l.key)
+          setLook((cur) => order[(order.indexOf(cur) + 1) % order.length])
+          haptics.tap()
+        },
+      }
+    : {}
+
   return (
     <div className="app">
       <div className="ambient" aria-hidden="true">
@@ -1250,7 +1276,7 @@ export default function App() {
               onClick={remixAll}
               disabled={busyImporting}
               aria-label="Remix"
-              title="Remix — regroup every slide with a fresh pairing idea"
+              title="Remix — regroup every slide with a fresh pairing idea (R)"
             >
               <ShuffleIcon size={22} weight="duotone" />
             </button>
@@ -1259,7 +1285,7 @@ export default function App() {
               onClick={() => setOptionsOpen((o) => !o)}
               aria-expanded={optionsOpen}
               aria-label="Options"
-              title="Options"
+              title="Options (O)"
             >
               <FadersHorizontalIcon size={22} weight="duotone" />
             </button>
@@ -1268,7 +1294,7 @@ export default function App() {
               onClick={downloadAll}
               disabled={busyImporting || !!exportState}
               aria-label="Download all"
-              title="Download all"
+              title="Download all (D)"
             >
               {exportState ? (
                 <span className="dock-progress">

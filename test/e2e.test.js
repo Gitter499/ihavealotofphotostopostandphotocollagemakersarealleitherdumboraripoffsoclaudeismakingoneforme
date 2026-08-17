@@ -254,6 +254,9 @@ try {
     `bubble thumbnails look identical (${new Set(thumbs).size} distinct of ${thumbs.length})`,
   )
   const withFilter = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  // settle the strip open first — clicking into the unfold animation is flaky
+  await page.locator('.filterbar').hover()
+  await page.waitForTimeout(500)
   await page.locator('[data-look="off"]').click()
   await page.waitForTimeout(300)
   const withoutFilter = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
@@ -677,6 +680,13 @@ try {
   await page.keyboard.press('Escape')
   await page.waitForTimeout(1200)
   console.log('  ok  reload restores the whole session from IndexedDB')
+
+  // keyboard: R remixes without touching the mouse (typing guard is covered
+  // by the caption test above — filling the input never triggered it)
+  await page.keyboard.press('r')
+  await page.waitForTimeout(700)
+  assert.match(await page.locator('.remix-toast').textContent(), /^Remixed/, 'R should trigger a remix')
+  console.log('  ok  keyboard shortcuts fire (R = remix)')
 
   // phone width: the stats chip must sit clear of the dock, not under it
   await page.setViewportSize({ width: 390, height: 844 })

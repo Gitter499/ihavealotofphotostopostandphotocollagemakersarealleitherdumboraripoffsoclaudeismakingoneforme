@@ -149,12 +149,17 @@ const mobile = await (
 await loadWithPhotos(mobile, 12)
 shots.mobile = await mobile.screenshot()
 
+// mobile with the ⋯ action sheet open — the thumb-zone story
+await mobile.locator('[aria-label="Slide actions"]').first().click()
+await mobile.waitForTimeout(600)
+shots.sheet = await mobile.screenshot()
+
 await browser.close()
 server.close()
 
 // content-hashed filenames + README rewrite
 for (const f of readdirSync(docs)) {
-  if (/^screen-(desktop|scrapbook|mobile).*\.png$/.test(f)) rmSync(join(docs, f))
+  if (/^screen-(desktop|scrapbook|mobile|sheet).*\.png$/.test(f)) rmSync(join(docs, f))
 }
 const names = {}
 for (const [k, buf] of Object.entries(shots)) {
