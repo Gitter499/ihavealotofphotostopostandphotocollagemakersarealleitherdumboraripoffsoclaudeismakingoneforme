@@ -248,10 +248,17 @@ body {
   background: linear-gradient(160deg, var(--system-teal), var(--system-blue) 60%, var(--system-indigo));
 }
 
-.counts {
+/* quiet corner chip for the photo/slide tally */
+.stats-corner {
+  position: fixed;
+  left: calc(var(--space-4) + env(safe-area-inset-left));
+  bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+  z-index: 40;
   color: var(--label-secondary);
-  font-size: var(--text-footnote);
+  font-size: var(--text-caption1);
   white-space: nowrap;
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
 }
 
 /* ---------- bottom cluster: filter bubbles + action dock ---------- */
