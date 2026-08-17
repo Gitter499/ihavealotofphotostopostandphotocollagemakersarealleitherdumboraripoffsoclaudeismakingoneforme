@@ -841,6 +841,38 @@ input[type='range']::-moz-range-thumb {
   }
 }
 
+/* meshed neighbours pull together and flatten their facing corners */
+.slide-card {
+  position: relative;
+}
+
+.slide-card.mesh-join-right {
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
+
+.slide-card.mesh-join-left {
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+  margin-left: calc(-1 * var(--space-2));
+}
+
+.mesh-link {
+  position: absolute;
+  top: 50%;
+  right: -19px;
+  transform: translateY(-50%);
+  z-index: 5;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--label-secondary);
+  pointer-events: none;
+}
+
 .slide-card.drop-target {
   border-color: rgba(10, 132, 255, 0.75);
   box-shadow:

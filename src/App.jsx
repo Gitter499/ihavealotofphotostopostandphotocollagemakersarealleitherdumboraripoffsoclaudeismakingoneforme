@@ -25,6 +25,7 @@ import {
   PlusIcon,
   MinusIcon,
   TrashIcon,
+  LinkSimpleIcon,
 } from '@phosphor-icons/react'
 
 const BG_SWATCHES = [
@@ -313,6 +314,24 @@ export default function App() {
     )
   }
 
+  // swap the two photos' positions in the slide's order — used when a seam
+  // bridge is involved, since the bridge is chosen from boundary positions.
+  // Dragging a photo onto the bridge (or the bridge onto a photo) hands the
+  // seam over to the other photo.
+  const swapPhotoOrder = (slideKey, idA, idB) => {
+    setSlides((prev) =>
+      prev.map((s) => {
+        if (s.key !== slideKey) return s
+        const ids = [...s.photoIds]
+        const ia = ids.indexOf(idA)
+        const ib = ids.indexOf(idB)
+        if (ia < 0 || ib < 0) return s
+        ;[ids[ia], ids[ib]] = [ids[ib], ids[ia]]
+        return { ...s, photoIds: ids }
+      }),
+    )
+  }
+
   // "−"/"+" on a slide: rebalance a boundary photo with a neighbouring slide
   const adjustSlide = (i, delta) => {
     setSlides((prev) => {
@@ -390,24 +409,44 @@ export default function App() {
         const el = document.elementFromPoint(ev.clientX, ev.clientY)
         const card = el?.closest?.('[data-slide-key]')
         const toKey = card?.dataset.slideKey
-        if (toKey && toKey !== slideKey) {
-          movePhoto(photoId, slideKey, toKey)
-        } else if (toKey === slideKey) {
+        // a seam bridge can be drawn on its neighbour's canvas — resolve the
+        // slide that actually owns the photo before deciding move vs swap
+        const ownerKey = slidesRef.current.find((s) => s.photoIds.includes(photoId))?.key ?? slideKey
+        if (toKey && toKey !== ownerKey) {
+          movePhoto(photoId, ownerKey, toKey)
+        } else if (toKey === ownerKey) {
           // dropped within the same slide → swap with the photo under the pointer
           const canvasEl = card.querySelector('.slide-canvas')
-          const idx = slidesRef.current.findIndex((s) => s.key === slideKey)
+          const idx = slidesRef.current.findIndex((s) => s.key === ownerKey)
           if (canvasEl && idx >= 0) {
             const box = canvasEl.getBoundingClientRect()
             const x = ((ev.clientX - box.left) / box.width) * canvasW
             const y = ((ev.clientY - box.top) / box.height) * canvasH
-            const rects = layoutsRef.current[idx]?.rects ?? []
+            const layout = layoutsRef.current[idx] ?? {}
+            const rects = layout.rects ?? []
+            const bridgeList = layout.bridges ?? []
             const ids = slidesRef.current[idx].photoIds
+            let targetId = null
             for (let r = 0; r < rects.length; r++) {
               const rect = rects[r]
               if (rect && x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
-                if (ids[r] !== photoId) swapPhotos(slideKey, photoId, ids[r])
+                targetId = ids[r]
                 break
               }
+            }
+            if (targetId == null) {
+              for (const b of bridgeList) {
+                const rect = b.rect
+                if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
+                  targetId = b.id
+                  break
+                }
+              }
+            }
+            if (targetId != null && targetId !== photoId) {
+              const bridgeInvolved = bridgeList.some((b) => b.id === photoId || b.id === targetId)
+              if (bridgeInvolved) swapPhotoOrder(ownerKey, photoId, targetId)
+              else swapPhotos(ownerKey, photoId, targetId)
             }
           }
         }
@@ -575,7 +614,9 @@ export default function App() {
             {slides.map((slide, i) => (
               <div
                 key={slide.key}
-                className={`slide-card glass-thin ${drag?.overKey === slide.key && drag.fromKey !== slide.key ? 'drop-target' : ''}`}
+                className={`slide-card glass-thin ${drag?.overKey === slide.key && drag.fromKey !== slide.key ? 'drop-target' : ''} ${
+                  layouts[i]?.bridges?.some((b) => b.rect.x === 0) ? 'mesh-join-left' : ''
+                } ${layouts[i]?.bridges?.some((b) => b.rect.x > 0) ? 'mesh-join-right' : ''}`}
                 data-slide-key={slide.key}
                 onMouseMove={(e) => {
                   if (drag || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
@@ -679,6 +720,11 @@ export default function App() {
                     animKey={`${slide.key}:${slide.seed}:${slide.photoIds.join(',')}:${aspect}:${gutter}:${(slide.swaps ?? []).length}`}
                     onPhotoPointerDown={(e, photoId) => startPhotoDrag(e, slide.key, photoId)}
                   />
+                )}
+                {layouts[i]?.bridges?.some((b) => b.rect.x > 0) && (
+                  <span className="mesh-link glass-thick" title="Meshed with the next slide — this photo continues across both">
+                    <LinkSimpleIcon size={13} weight="bold" />
+                  </span>
                 )}
               </div>
             ))}
@@ -882,15 +928,17 @@ function BubbleThumb({ photo, lookKey }) {
     canvas.height = size
     const ctx = canvas.getContext('2d', { willReadFrequently: true })
     const bmp = photo?.previewBitmap
-    if (!bmp) {
+    if (!bmp || !bmp.width) {
       ctx.fillStyle = '#3a3a44'
       ctx.fillRect(0, 0, size, size)
       return
     }
+    // Destination-rect cover draw (no source cropping) + a pure pixel
+    // hand-off to the visible canvas — the most Safari-tolerant path.
     const s = Math.max(size / bmp.width, size / bmp.height)
-    const sw = size / s
-    const sh = size / s
-    ctx.drawImage(bmp, (bmp.width - sw) / 2, (bmp.height - sh) / 2, sw, sh, 0, 0, size, size)
+    const dw = bmp.width * s
+    const dh = bmp.height * s
+    ctx.drawImage(bmp, (size - dw) / 2, (size - dh) / 2, dw, dh)
     const m = matrixFor(photo, lookKey)
     if (m) {
       const imageData = ctx.getImageData(0, 0, size, size)

@@ -101,6 +101,14 @@ export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, b
         return
       }
     }
+    // seam strips are photos too — the bridge stays draggable under mesh
+    for (const b of layout.bridges ?? []) {
+      const r = b.rect
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+        onPhotoPointerDown(e, b.id)
+        return
+      }
+    }
   }
 
   // Block scroll only while a drag is actually active (set by App via a data

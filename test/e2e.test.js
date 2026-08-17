@@ -215,6 +215,26 @@ try {
   // filter bubble strip: Off must actually change the rendered pixels back
   const bubbleCount = await page.locator('.filterbar .bubble').count()
   assert.ok(bubbleCount >= 7, `expected ≥7 filter bubbles, got ${bubbleCount}`)
+  // each bubble must contain actual image detail, not a flat/empty circle
+  const bubbleDetail = await page.evaluate(() => {
+    const c = document.querySelector('.bubble-thumb')
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data
+    let sum = 0
+    let sumSq = 0
+    let n = 0
+    let opaque = 0
+    for (let i = 0; i < d.length; i += 4) {
+      const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]
+      sum += l
+      sumSq += l * l
+      n++
+      if (d[i + 3] > 200) opaque++
+    }
+    const mean = sum / n
+    return { std: Math.sqrt(sumSq / n - mean * mean), opaque: opaque / n }
+  })
+  assert.ok(bubbleDetail.opaque > 0.95, `bubble thumb mostly transparent (${bubbleDetail.opaque})`)
+  assert.ok(bubbleDetail.std > 8, `bubble thumb has no image detail (std ${bubbleDetail.std})`)
   // every bubble previews a DIFFERENT treatment of the same photo
   const thumbs = await page.evaluate(() =>
     [...document.querySelectorAll('.bubble-thumb')].map((c) => c.toDataURL()),
@@ -406,9 +426,39 @@ try {
     return a.map((v, i) => Math.abs(v - b[i]))
   })
   assert.ok(Math.max(...seamDiff) < 30, `seam edges do not continue: ${seamDiff}`)
+  console.log('  ok  mesh flows a photo across the slide seam (edge colours continue)')
+
+  // meshed neighbours are visibly joined, and photos stay movable —
+  // including the bridge itself, dragged out of its seam strip
+  assert.ok((await page.locator('.slide-card.mesh-join-right').count()) >= 1, 'no mesh join indication')
+  assert.ok((await page.locator('.mesh-link').count()) >= 1, 'no seam link chip')
+  await closeOptions()
+  const meshCounts = () =>
+    page.evaluate(() => [...document.querySelectorAll('.slide-count')].map((el) => parseInt(el.textContent, 10)))
+  const beforeBridgeDrag = await meshCounts()
+  // earlier steps clicked .last() controls and left the filmstrip scrolled to
+  // its far end — raw mouse coords need the first slides back on screen
+  await page.locator('.slide-canvas').first().scrollIntoViewIfNeeded()
+  await page.waitForTimeout(200)
+  const c1 = await page.locator('.slide-canvas').first().boundingBox()
+  const c2 = await page.locator('.slide-canvas').nth(2).boundingBox() // a slide that cannot own the seam-0 bridge
+  assert.ok(c1.x >= 0 && c2.x + c2.width <= page.viewportSize().width, 'drag endpoints must be on screen')
+  await page.mouse.move(c1.x + c1.width - 12, c1.y + c1.height / 2) // inside the right seam strip
+  await page.mouse.down()
+  await page.mouse.move(c2.x + c2.width / 2, c2.y + c2.height / 2, { steps: 14 })
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  const afterBridgeDrag = await meshCounts()
+  assert.equal(
+    afterBridgeDrag.reduce((a, b) => a + b, 0),
+    beforeBridgeDrag.reduce((a, b) => a + b, 0),
+    'bridge drag dropped a photo',
+  )
+  assert.notDeepEqual(afterBridgeDrag, beforeBridgeDrag, 'bridge photo could not be moved while meshed')
+  console.log('  ok  meshed slides show the join and the bridge photo stays draggable')
+  await openOptions()
   await page.locator('[aria-label="Mesh slides"]').getByRole('button', { name: 'Off' }).click()
   await closeOptions()
-  console.log('  ok  mesh flows a photo across the slide seam (edge colours continue)')
 
   // 200-photo stress: import must complete and stay responsive
   const many = []
