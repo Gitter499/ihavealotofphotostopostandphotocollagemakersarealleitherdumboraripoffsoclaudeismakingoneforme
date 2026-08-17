@@ -416,9 +416,7 @@ export default function App() {
       <header className="topbar glass-thick">
         <div className="brand">
           <Logo size={18} />
-          <span className="brand-name">
-            Photo Dump <span className="brand-arrow">→</span> Carousel
-          </span>
+          <span className="brand-name">photogram</span>
         </div>
         {hasPhotos && (
           <div className="counts" aria-live="polite">
@@ -682,29 +680,47 @@ export default function App() {
         <div className="bottom-cluster">
           <FilterBar photo={photos.values().next().value} look={look} setLook={setLook} />
           <nav className="dock glass-thick" aria-label="Actions">
-            <button className="dock-btn" onClick={() => fileInputRef.current?.click()} disabled={busyImporting}>
-              Add photos
+            <button
+              className="dock-btn"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={busyImporting}
+              aria-label="Add photos"
+              title="Add photos"
+            >
+              <Glyph size={19} d="M8 2.5v11M2.5 8h11" />
             </button>
-            <button className="dock-btn" onClick={shuffleAll} disabled={busyImporting}>
-              Shuffle all
+            <button
+              className="dock-btn"
+              onClick={shuffleAll}
+              disabled={busyImporting}
+              aria-label="Shuffle all"
+              title="Shuffle all"
+            >
+              <Glyph size={19} d="M2 4.5h2.6l6.8 7H14M2 11.5h2.6l1.7-1.75M9.7 6.25l1.7-1.75H14M12 2.5l2 2-2 2M12 9.5l2 2-2 2" />
             </button>
             <button
               className={`dock-btn ${optionsOpen ? 'dock-btn-active' : ''}`}
               onClick={() => setOptionsOpen((o) => !o)}
               aria-expanded={optionsOpen}
+              aria-label="Options"
+              title="Options"
             >
-              Options
+              <Glyph size={19} d="M2.5 5h6M11.5 5h2M2.5 11h2M7.5 11h6M9.5 3v4M4.5 9v4" />
             </button>
             <button
               className="dock-btn dock-btn-primary"
               onClick={downloadAll}
               disabled={busyImporting || !!exportState}
+              aria-label="Download all"
+              title="Download all"
             >
-              {exportState
-                ? exportState.done < exportState.total
-                  ? `Rendering ${exportState.done + 1}/${exportState.total}…`
-                  : 'Zipping…'
-                : 'Download all'}
+              {exportState ? (
+                <span className="dock-progress">
+                  {exportState.done < exportState.total ? `${exportState.done + 1}/${exportState.total}` : '…'}
+                </span>
+              ) : (
+                <Glyph size={19} d="M8 2.5v7.5m0 0 3-3m-3 3-3-3M3 13.5h10" />
+              )}
             </button>
           </nav>
         </div>
@@ -770,11 +786,11 @@ function BubbleThumb({ photo, lookKey }) {
 }
 
 // One icon voice: 16px grid, 1.8 stroke, round caps — no mixed glyph sets.
-function Glyph({ d }) {
+function Glyph({ d, size = 16 }) {
   return (
     <svg
-      width="16"
-      height="16"
+      width={size}
+      height={size}
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
