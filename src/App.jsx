@@ -233,35 +233,23 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="topbar">
+      <div className="ambient" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
+      <header className="topbar glass-thick">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
-          <span className="brand-name">Photo Dump → Carousel</span>
+          <span className="brand-name">
+            Photo Dump <span className="brand-arrow">→</span> Carousel
+          </span>
         </div>
         {hasPhotos && (
           <div className="counts" aria-live="polite">
             {photos.size} photos · {slides.length} slides
           </div>
         )}
-        <div className="topbar-actions">
-          {hasPhotos && (
-            <>
-              <button className="btn" onClick={() => fileInputRef.current?.click()} disabled={busyImporting}>
-                Add photos
-              </button>
-              <button className="btn" onClick={shuffleAll} disabled={busyImporting}>
-                Shuffle all
-              </button>
-              <button className="btn btn-primary" onClick={downloadAll} disabled={busyImporting || !!exportState}>
-                {exportState
-                  ? exportState.done < exportState.total
-                    ? `Rendering ${exportState.done + 1}/${exportState.total}…`
-                    : 'Zipping…'
-                  : 'Download all'}
-              </button>
-            </>
-          )}
-        </div>
       </header>
 
       <input
@@ -280,18 +268,18 @@ export default function App() {
       {(notice || skipped.length > 0) && (
         <div className="notices">
           {notice?.type === 'raised' && (
-            <div className="notice">
+            <div className="notice glass-thin">
               Raised to {notice.per} photos per slide so everything fits in Instagram's 20-slide limit.
             </div>
           )}
           {notice?.type === 'overflow' && (
-            <div className="notice notice-warn">
+            <div className="notice notice-warn glass-thin">
               Instagram caps a carousel at 20 slides of 8 photos — {notice.included} photos fit,{' '}
               {notice.excluded} (the most recent) are left out. Post them as a second carousel.
             </div>
           )}
           {skipped.length > 0 && (
-            <div className="notice notice-warn">
+            <div className="notice notice-warn glass-thin">
               Skipped {skipped.length === 1 ? 'an unsupported file' : `${skipped.length} unsupported files`}:{' '}
               {skipped.slice(0, 4).join(', ')}
               {skipped.length > 4 ? '…' : ''} — JPEG, PNG, WebP, GIF and HEIC work.
@@ -305,7 +293,7 @@ export default function App() {
 
       {!hasPhotos ? (
         <div
-          className="dropzone"
+          className="dropzone glass-thin"
           onClick={() => fileInputRef.current?.click()}
           role="button"
           tabIndex={0}
@@ -325,6 +313,11 @@ export default function App() {
             </div>
           ) : (
             <>
+              <div className="drop-ghosts" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </div>
               <p className="drop-title">Drop your photos.</p>
               <p className="drop-sub">You'll get carousel slides, ready to post.</p>
               <p className="drop-hint">
@@ -335,7 +328,7 @@ export default function App() {
         </div>
       ) : (
         <>
-          <div className="controls">
+          <div className="controls glass">
             <label className="control">
               <span className="control-label">
                 Photos per slide <b>{perSlide}</b>
@@ -391,7 +384,7 @@ export default function App() {
             {slides.map((slide, i) => (
               <div
                 key={slide.key}
-                className={`slide-card ${drag?.overKey === slide.key && drag.fromKey !== slide.key ? 'drop-target' : ''}`}
+                className={`slide-card glass-thin ${drag?.overKey === slide.key && drag.fromKey !== slide.key ? 'drop-target' : ''}`}
                 data-slide-key={slide.key}
                 onDragOver={(e) => {
                   if (slideDragIndex.current != null) e.preventDefault()
@@ -472,6 +465,28 @@ export default function App() {
             exports at 1080 × {canvasH === 1080 ? 1080 : 1350}, JPEG 92
           </p>
         </>
+      )}
+
+      {hasPhotos && (
+        <nav className="dock glass-thick" aria-label="Actions">
+          <button className="dock-btn" onClick={() => fileInputRef.current?.click()} disabled={busyImporting}>
+            Add photos
+          </button>
+          <button className="dock-btn" onClick={shuffleAll} disabled={busyImporting}>
+            Shuffle all
+          </button>
+          <button
+            className="dock-btn dock-btn-primary"
+            onClick={downloadAll}
+            disabled={busyImporting || !!exportState}
+          >
+            {exportState
+              ? exportState.done < exportState.total
+                ? `Rendering ${exportState.done + 1}/${exportState.total}…`
+                : 'Zipping…'
+              : 'Download all'}
+          </button>
+        </nav>
       )}
 
       {drag && <DragGhost drag={drag} photo={photos.get(drag.photoId)} />}

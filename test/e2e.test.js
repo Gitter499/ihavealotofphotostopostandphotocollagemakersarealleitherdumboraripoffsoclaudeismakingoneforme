@@ -163,7 +163,9 @@ try {
   assert.match(skipNotice, /notes\.txt/)
   console.log('  ok  unsupported file named in notice, batch not discarded')
 
-  // slides render non-empty (canvas has non-background pixels)
+  // slides render non-empty (canvas has non-background pixels);
+  // the compose animation runs ≤800ms, so let it settle first
+  await page.waitForTimeout(1100)
   const painted = await page.evaluate(() => {
     const c = document.querySelector('.slide-canvas')
     const ctx = c.getContext('2d')
