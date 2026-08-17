@@ -1,0 +1,46 @@
+name: Update README screenshots
+
+# Rebuilds the app after every change to it, captures fresh desktop /
+# scrapbook / mobile screenshots, and commits them together with a rewritten
+# README: filenames are content-hashed, so each refresh gets a new URL and
+# GitHub's image cache can never serve a stale shot.
+# Pushes made with the workflow token don't retrigger workflows, and doc-only
+# pushes are ignored, so this can't loop.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: screenshots
+  cancel-in-progress: true
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright@1.62.1 install chromium --with-deps
+      - run: npm run screens
+      - name: Commit refreshed screenshots and README
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add docs README.md
+            git commit -m "Update README screenshots [auto]"
+            git push
+          fi
