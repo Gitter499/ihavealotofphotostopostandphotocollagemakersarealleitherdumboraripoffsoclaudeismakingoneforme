@@ -16,6 +16,7 @@ import { exportAllAsZip, renderSlideBlob, slideFileName, saveBlob } from './lib/
 import { remixPlan } from './lib/remix.js'
 import { randomSeed } from './lib/rng.js'
 import { tiltAngle } from './lib/render.js'
+import { templatesFor, templateById, templateRects } from './lib/templates.js'
 import SlideCanvas from './components/SlideCanvas.jsx'
 import Logo from './components/Logo.jsx'
 import Wordmark from './components/Wordmark.jsx'
@@ -29,6 +30,8 @@ import {
   TrashIcon,
   LinkSimpleIcon,
   LinkBreakIcon,
+  SquaresFourIcon,
+  TextTIcon,
 } from '@phosphor-icons/react'
 
 const BG_SWATCHES = [
@@ -68,6 +71,12 @@ export default function App() {
   const [meshSeams, setMeshSeams] = useState(() => new Set()) // seam keys "aKey|bKey" bridged by a photo
   const [sizeBoosts, setSizeBoosts] = useState(() => new Map()) // photoId → area weight (1 = neutral)
   const [sizeEdit, setSizeEdit] = useState(null) // {photoId, x, y} — tap-to-resize popover
+  const [slideTemplates, setSlideTemplates] = useState(() => new Map()) // slideKey → template id ('' = auto)
+  const [tplEdit, setTplEdit] = useState(null) // {slideKey, count, x, y} — template picker
+  const [captions, setCaptions] = useState(() => new Map()) // slideKey → {text, pos}
+  const [capEdit, setCapEdit] = useState(null) // {slideKey, x, y} — caption editor
+  const [borderW, setBorderW] = useState(0) // px stroke around every photo
+  const [borderColor, setBorderColor] = useState('#ffffff')
   const [aspect, setAspect] = useState('4:5')
   const [importState, setImportState] = useState(null) // {done, total}
   const [skipped, setSkipped] = useState([])
@@ -82,7 +91,7 @@ export default function App() {
   trayRef.current = tray
 
   const canvasW = 1080
-  const canvasH = aspect === '1:1' ? 1080 : 1350
+  const canvasH = aspect === '1:1' ? 1080 : aspect === '9:16' ? 1920 : 1350
   const margin = gutter * 2 // gutter 8 → margin 16 (spec defaults); gutter 0 → full bleed
 
   const recompose = useCallback((photosMap, per) => {
@@ -132,6 +141,8 @@ export default function App() {
       if (e.key === 'Escape') {
         setOptionsOpen(false)
         setSizeEdit(null)
+        setTplEdit(null)
+        setCapEdit(null)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -146,6 +157,8 @@ export default function App() {
     () => setOptionsOpen(false),
   )
   useDismiss(!!sizeEdit, (e) => e.target.closest?.('.size-popover'), () => setSizeEdit(null))
+  useDismiss(!!tplEdit, (e) => e.target.closest?.('.tpl-popover'), () => setTplEdit(null))
+  useDismiss(!!capEdit, (e) => e.target.closest?.('.cap-popover'), () => setCapEdit(null))
 
   // Accept drops anywhere on the page.
   useEffect(() => {
@@ -211,8 +224,12 @@ export default function App() {
       // tap-to-resize: a boosted photo pulls a matching share of the canvas
       const boosts = innerIds.map((id) => sizeBoosts.get(id) ?? 1)
       const quals = innerIds.map((id) => eff.get(id) ?? 0.5)
+      const innerW = canvasW - leftStrip - rightStrip
+      // a pinned template wins over the BSP engine while its count matches
+      const tpl = templateById(slideTemplates.get(s.key))
+      const usingTpl = tpl && tpl.count === innerIds.length
       const opts = {
-        canvasW: canvasW - leftStrip - rightStrip,
+        canvasW: innerW,
         canvasH,
         margin,
         gutter,
@@ -222,9 +239,12 @@ export default function App() {
       }
       // per-slide cache: dragging one photo's size slider only relays out
       // the slide that actually changed
-      const cacheKey = JSON.stringify([s.key, innerIds, boosts, quals, opts.canvasW, canvasH, margin, gutter, s.seed])
+      const cacheKey = JSON.stringify([s.key, innerIds, boosts, quals, innerW, canvasH, margin, gutter, s.seed, usingTpl && tpl.id])
       const inner =
-        layoutCache.current.get(cacheKey) ?? computeLayout(innerIds.map((id) => photos.get(id)?.aspect ?? 1), opts)
+        layoutCache.current.get(cacheKey) ??
+        (usingTpl
+          ? { rects: templateRects(tpl, { canvasW: innerW, canvasH, margin, gutter }), seed: s.seed }
+          : computeLayout(innerIds.map((id) => photos.get(id)?.aspect ?? 1), opts))
       nextCache.set(cacheKey, inner)
       const rectById = new Map(
         innerIds.map((id, j) => [
@@ -254,7 +274,7 @@ export default function App() {
     })
     layoutCache.current = nextCache
     return result
-  }, [slides, photos, canvasW, canvasH, margin, gutter, meshSeams, sizeBoosts])
+  }, [slides, photos, canvasW, canvasH, margin, gutter, meshSeams, sizeBoosts, slideTemplates])
 
   const toggleSeam = (i) => {
     const key = seamKey(i)
@@ -336,6 +356,14 @@ export default function App() {
   }, [bgMode, slides, photos])
 
   const shuffleSlide = (i) => {
+    // shuffling always shows something new — a pinned template unpins first
+    const key = slides[i]?.key
+    setSlideTemplates((prev) => {
+      if (!prev.has(key)) return prev
+      const next = new Map(prev)
+      next.delete(key)
+      return next
+    })
     setSlides((prev) => prev.map((s, j) => (j === i ? { ...s, seed: randomSeed(), swaps: [] } : s)))
   }
 
@@ -590,7 +618,15 @@ export default function App() {
         filled.map((x) => x.s),
         filled.map((x) => x.layout),
         photos,
-        { ...exportOpts, bgs: filled.map((x) => x.bg), look, tilt, radius: cornerRadius },
+        {
+          ...exportOpts,
+          bgs: filled.map((x) => x.bg),
+          look,
+          tilt,
+          radius: cornerRadius,
+          border: borderW > 0 ? { width: borderW, color: borderColor } : null,
+          captions,
+        },
         (done, total) => setExportState({ done, total }),
       )
       saveBlob(zip, 'carousel.zip')
@@ -608,6 +644,8 @@ export default function App() {
       look,
       tilt,
       radius: cornerRadius,
+      border: borderW > 0 ? { width: borderW, color: borderColor } : null,
+      caption: captions.get(slides[i].key) ?? null,
     })
     saveBlob(blob, slideFileName(i))
   }
@@ -785,6 +823,19 @@ export default function App() {
                   </span>
                   <span className="slide-actions">
                     {[
+                      {
+                        Icon: SquaresFourIcon,
+                        label: 'Layout template',
+                        fn: (e) =>
+                          setTplEdit({ slideKey: slide.key, count: slide.photoIds.length, x: e.clientX, y: e.clientY }),
+                        needsPhotos: true,
+                      },
+                      {
+                        Icon: TextTIcon,
+                        label: 'Caption',
+                        fn: (e) => setCapEdit({ slideKey: slide.key, x: e.clientX, y: e.clientY }),
+                        needsPhotos: true,
+                      },
                       { Icon: ShuffleIcon, label: 'Shuffle this slide', fn: () => shuffleSlide(i), needsPhotos: true },
                       { Icon: DownloadSimpleIcon, label: 'Download this slide', fn: () => downloadOne(i), needsPhotos: true },
                       { Icon: TrashIcon, label: 'Delete this slide', fn: () => deleteSlide(i), danger: true },
@@ -817,7 +868,9 @@ export default function App() {
                     imagesOverride={lookImages}
                     tilt={tilt}
                     radius={cornerRadius}
-                    animKey={`${slide.key}:${slide.seed}:${slide.photoIds.join(',')}:${aspect}:${gutter}:${(slide.swaps ?? []).length}:${slide.photoIds.map((id) => sizeBoosts.get(id) ?? 1).join('_')}`}
+                    border={borderW > 0 ? { width: borderW, color: borderColor } : null}
+                    caption={captions.get(slide.key) ?? null}
+                    animKey={`${slide.key}:${slide.seed}:${slide.photoIds.join(',')}:${aspect}:${gutter}:${(slide.swaps ?? []).length}:${slide.photoIds.map((id) => sizeBoosts.get(id) ?? 1).join('_')}:${slideTemplates.get(slide.key) ?? ''}`}
                     onPhotoPointerDown={(e, photoId) => startPhotoDrag(e, slide.key, photoId)}
                   />
                 )}
@@ -915,6 +968,7 @@ export default function App() {
               ['Gutter', gutter, setGutter, 24, 'px'],
               ['Tilt', tilt, setTilt, 6, '°'],
               ['Corners', cornerRadius, setCornerRadius, 28, 'px'],
+              ['Border', borderW, setBorderW, 12, 'px'],
             ].map(([label, value, set, max, unit]) => (
               <label className="control" key={label}>
                 <span className="control-label">
@@ -927,6 +981,22 @@ export default function App() {
                 <input type="range" min="0" max={max} value={value} onChange={(e) => set(Number(e.target.value))} />
               </label>
             ))}
+            {borderW > 0 && (
+              <div className="control">
+                <span className="control-label">Border colour</span>
+                <div className="swatches">
+                  {['#ffffff', '#0d0d0d', '#f6f4ef'].map((c) => (
+                    <button
+                      key={c}
+                      className={`swatch ${borderColor === c ? 'active' : ''}`}
+                      style={{ background: c }}
+                      aria-label={`Border ${c}`}
+                      onClick={() => setBorderColor(c)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="control">
               <span className="control-label">Background</span>
               <div className="swatches">
@@ -945,7 +1015,7 @@ export default function App() {
             <div className="control">
               <span className="control-label">Aspect</span>
               <div className="segmented">
-                {['4:5', '1:1'].map((a) => (
+                {['4:5', '1:1', '9:16'].map((a) => (
                   <button key={a} className={aspect === a ? 'active' : ''} onClick={() => setAspect(a)}>
                     {a}
                   </button>
@@ -1037,6 +1107,111 @@ export default function App() {
       )}
 
       {drag && <DragGhost drag={drag} photo={photos.get(drag.photoId)} />}
+
+      {tplEdit && (
+        <div
+          className="tpl-popover glass-thick"
+          role="dialog"
+          aria-label="Layout template"
+          style={{
+            left: Math.max(8, Math.min(tplEdit.x - 150, window.innerWidth - 320)),
+            top: Math.max(8, Math.min(tplEdit.y + 14, window.innerHeight - 300)),
+          }}
+        >
+          <span className="control-label">Template</span>
+          <div className="tpl-grid">
+            <button
+              className={`tpl-option ${!slideTemplates.get(tplEdit.slideKey) ? 'active' : ''}`}
+              onClick={() => {
+                setSlideTemplates((prev) => {
+                  const next = new Map(prev)
+                  next.delete(tplEdit.slideKey)
+                  return next
+                })
+              }}
+            >
+              <span className="tpl-preview tpl-auto">✳︎</span>
+              <span className="tpl-name">Auto</span>
+            </button>
+            {templatesFor(tplEdit.count).map((t) => (
+              <button
+                key={t.id}
+                data-template={t.id}
+                className={`tpl-option ${slideTemplates.get(tplEdit.slideKey) === t.id ? 'active' : ''}`}
+                onClick={() => setSlideTemplates((prev) => new Map(prev).set(tplEdit.slideKey, t.id))}
+              >
+                <span className="tpl-preview" style={{ aspectRatio: `${canvasW} / ${canvasH}` }}>
+                  {t.cells.map((c, j) => (
+                    <span
+                      key={j}
+                      className="tpl-cell"
+                      style={{
+                        left: `${c.x * 100}%`,
+                        top: `${c.y * 100}%`,
+                        width: `${c.w * 100}%`,
+                        height: `${c.h * 100}%`,
+                        transform: c.rot ? `rotate(${c.rot}deg)` : undefined,
+                      }}
+                    />
+                  ))}
+                </span>
+                <span className="tpl-name">{t.name}</span>
+              </button>
+            ))}
+          </div>
+          {templatesFor(tplEdit.count).length === 0 && (
+            <p className="playground-hint">No fixed templates for {tplEdit.count} photos — Auto composes them.</p>
+          )}
+        </div>
+      )}
+
+      {capEdit && (
+        <div
+          className="cap-popover glass-thick"
+          role="dialog"
+          aria-label="Caption"
+          style={{
+            left: Math.max(8, Math.min(capEdit.x - 150, window.innerWidth - 320)),
+            top: Math.max(8, Math.min(capEdit.y + 14, window.innerHeight - 180)),
+          }}
+        >
+          <span className="control-label">Caption</span>
+          <input
+            type="text"
+            className="cap-input"
+            maxLength={80}
+            placeholder="Say something…"
+            value={captions.get(capEdit.slideKey)?.text ?? ''}
+            autoFocus
+            onChange={(e) => {
+              const text = e.target.value
+              setCaptions((prev) => {
+                const next = new Map(prev)
+                if (!text) next.delete(capEdit.slideKey)
+                else next.set(capEdit.slideKey, { text, pos: prev.get(capEdit.slideKey)?.pos ?? 'bottom' })
+                return next
+              })
+            }}
+          />
+          <div className="segmented" role="group" aria-label="Caption position">
+            {['top', 'bottom'].map((p) => (
+              <button
+                key={p}
+                className={(captions.get(capEdit.slideKey)?.pos ?? 'bottom') === p ? 'active' : ''}
+                onClick={() =>
+                  setCaptions((prev) => {
+                    const cur = prev.get(capEdit.slideKey)
+                    if (!cur) return prev
+                    return new Map(prev).set(capEdit.slideKey, { ...cur, pos: p })
+                  })
+                }
+              >
+                {p === 'top' ? 'Top' : 'Bottom'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {sizeEdit && (
         <div

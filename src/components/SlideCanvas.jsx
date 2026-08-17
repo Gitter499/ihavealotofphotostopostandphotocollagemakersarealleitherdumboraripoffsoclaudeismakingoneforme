@@ -10,7 +10,21 @@ const MORPH_MS = 420
 //    (shuffle, gutter, aspect changes) — FLIP on canvas
 //  - static: plain redraw (filter/background changes)
 // All motion collapses to a static draw under prefers-reduced-motion.
-export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, bg, imagesOverride, tilt, radius, animKey, onPhotoPointerDown }) {
+export default function SlideCanvas({
+  slide,
+  layout,
+  photos,
+  canvasW,
+  canvasH,
+  bg,
+  imagesOverride,
+  tilt,
+  radius,
+  border,
+  caption,
+  animKey,
+  onPhotoPointerDown,
+}) {
   const ref = useRef(null)
   const lastAnimKey = useRef(null)
   const shownRects = useRef(null) // Map id → rect currently on screen
@@ -24,11 +38,13 @@ export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, b
     if (canvas.height !== bh) canvas.height = bh
     const ctx = canvas.getContext('2d')
     const images = new Map()
+    const focals = new Map()
     const neededIds = [...slide.photoIds, ...(layout.bridges ?? []).map((b) => b.id)]
     for (const id of neededIds) {
       const p = photos.get(id)
       const bmp = imagesOverride?.get(id) ?? p?.previewBitmap
       if (bmp) images.set(id, bmp)
+      if (p?.focal) focals.set(id, p.focal)
     }
     const draw = (rects, progressOf) => {
       ctx.setTransform(scale, 0, 0, scale, 0, 0)
@@ -43,6 +59,9 @@ export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, b
         tilt,
         radius,
         bridges: layout.bridges ?? [],
+        focals,
+        border,
+        caption,
       })
       // remember what is actually on screen so an interrupted morph
       // continues from where it is instead of jumping
@@ -87,14 +106,15 @@ export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, b
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [slide, layout, photos, canvasW, canvasH, bg, imagesOverride, tilt, radius, animKey])
+  }, [slide, layout, photos, canvasW, canvasH, bg, imagesOverride, tilt, radius, border, caption, animKey])
 
   const handlePointerDown = (e) => {
     if (!onPhotoPointerDown) return
     const box = ref.current.getBoundingClientRect()
     const x = ((e.clientX - box.left) / box.width) * canvasW
     const y = ((e.clientY - box.top) / box.height) * canvasH
-    for (let i = 0; i < layout.rects.length; i++) {
+    // reverse order: scatter-template cells overlap, and the last drawn is on top
+    for (let i = layout.rects.length - 1; i >= 0; i--) {
       const r = layout.rects[i]
       if (r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
         onPhotoPointerDown(e, slide.photoIds[i])

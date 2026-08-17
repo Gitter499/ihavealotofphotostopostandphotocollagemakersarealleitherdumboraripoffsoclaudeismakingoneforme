@@ -16,6 +16,8 @@ import { tiltAngle } from '../src/lib/render.js'
 import { computeLayout, cropLoss, MAX_CROP_LOSS } from '../src/lib/layout.js'
 import { mulberry32 } from '../src/lib/rng.js'
 import { remixPlan, remixWith, REMIX_LENSES } from '../src/lib/remix.js'
+import { TEMPLATES, templatesFor, templateRects } from '../src/lib/templates.js'
+import { coverCrop } from '../src/lib/render.js'
 
 let failures = 0
 function test(name, fn) {
@@ -526,6 +528,56 @@ test('a size weight pulls a photo toward a matching share of the canvas', () => 
   // weights: null must reproduce the unweighted layout exactly
   const nullWeights = computeLayout(aspects, { ...base, weights: null })
   assert.deepEqual(nullWeights.rects, even.rects)
+})
+
+// ---------- template engine ----------
+
+test('every template is well-formed: unique id, matching count, sane cells', () => {
+  const ids = new Set()
+  for (const t of TEMPLATES) {
+    assert.ok(!ids.has(t.id), `duplicate template id ${t.id}`)
+    ids.add(t.id)
+    assert.equal(t.cells.length, t.count, `${t.id}: count ${t.count} but ${t.cells.length} cells`)
+    for (const c of t.cells) {
+      assert.ok(c.x >= 0 && c.y >= 0 && c.x + c.w <= 1.001 && c.y + c.h <= 1.001, `${t.id}: cell out of bounds`)
+      assert.ok(c.w >= 0.08 && c.h >= 0.08, `${t.id}: sliver cell ${c.w}×${c.h}`)
+    }
+  }
+  // every supported count has at least two fixed choices besides Auto
+  for (let n = 1; n <= 8; n++) assert.ok(templatesFor(n).length >= 2, `only ${templatesFor(n).length} templates for ${n}`)
+})
+
+test('templateRects maps cells into the canvas with margin and gutter', () => {
+  const geo = { canvasW: 1080, canvasH: 1350, margin: 16, gutter: 8 }
+  for (const t of TEMPLATES) {
+    const rects = templateRects(t, geo)
+    for (const r of rects) {
+      assert.ok(r.w > 0 && r.h > 0, `${t.id}: degenerate rect`)
+      assert.ok(r.x >= 0 && r.y >= 0 && r.x + r.w <= 1080.01 && r.y + r.h <= 1350.01, `${t.id}: rect out of canvas`)
+      if (r.rot) assert.ok(Math.abs(r.rot) < 0.3, `${t.id}: rotation should be subtle radians`)
+    }
+    if (!t.loose && t.count > 1) {
+      // spot check: adjacent non-loose cells are separated by the gutter
+      const [a, b] = rects
+      const gap = Math.min(Math.abs(b.x - (a.x + a.w)), Math.abs(b.y - (a.y + a.h)))
+      assert.ok(gap >= 7.9 || gap > 500, `${t.id}: cells touch (gap ${gap})`)
+    }
+  }
+})
+
+// ---------- saliency-driven cover crops ----------
+
+test('coverCrop slides toward the focal point and clamps at edges', () => {
+  // landscape photo into a square slot: only x can move
+  const centered = coverCrop(2000, 1000, 1, null)
+  assert.equal(centered.sx, 500)
+  const left = coverCrop(2000, 1000, 1, { x: 0.1, y: 0.5 })
+  assert.equal(left.sx, 0, 'far-left subject should clamp to the left edge')
+  const right = coverCrop(2000, 1000, 1, { x: 0.72, y: 0.5 })
+  assert.ok(Math.abs(right.sx - (0.72 * 2000 - 500)) < 1e-6, 'crop window centres on the subject')
+  // crop size never changes, only its position
+  assert.equal(right.sw, 1000)
+  assert.equal(right.sh, 1000)
 })
 
 // ---------- remix lenses ----------

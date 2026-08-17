@@ -34,8 +34,14 @@ async function decodeFiltered(photo, look) {
   return canvas
 }
 
-export async function renderSlideBlob(slide, layout, photosById, { width, height, bg, look, tilt = 0, radius = 0 }) {
+export async function renderSlideBlob(
+  slide,
+  layout,
+  photosById,
+  { width, height, bg, look, tilt = 0, radius = 0, border = null, caption = null },
+) {
   const images = new Map()
+  const focals = new Map()
   const rects = layout.rects
   const bridges = layout.bridges ?? []
   try {
@@ -43,14 +49,16 @@ export async function renderSlideBlob(slide, layout, photosById, { width, height
     await Promise.all(
       neededIds.map(async (id) => {
         const photo = photosById.get(id)
-        if (photo) images.set(id, await decodeFiltered(photo, look))
+        if (!photo) return
+        images.set(id, await decodeFiltered(photo, look))
+        if (photo.focal) focals.set(id, photo.focal)
       }),
     )
     const canvas = new OffscreenCanvas(Math.round(width * EXPORT_SCALE), Math.round(height * EXPORT_SCALE))
     const ctx = canvas.getContext('2d')
     ctx.imageSmoothingQuality = 'high'
     ctx.scale(EXPORT_SCALE, EXPORT_SCALE)
-    drawSlide(ctx, { width, height, bg, photoIds: slide.photoIds, rects, images, tilt, radius, bridges })
+    drawSlide(ctx, { width, height, bg, photoIds: slide.photoIds, rects, images, tilt, radius, bridges, focals, border, caption })
     return await canvas.convertToBlob({ type: 'image/jpeg', quality: EXPORT_QUALITY })
   } finally {
     for (const img of images.values()) img.close?.()
@@ -61,7 +69,13 @@ export function slideFileName(index) {
   return String(index + 1).padStart(2, '0') + '.jpg'
 }
 
-export async function exportAllAsZip(slides, layouts, photosById, { width, height, bgs, look, tilt, radius }, onProgress) {
+export async function exportAllAsZip(
+  slides,
+  layouts,
+  photosById,
+  { width, height, bgs, look, tilt, radius, border, captions },
+  onProgress,
+) {
   const zip = new JSZip()
   for (let i = 0; i < slides.length; i++) {
     onProgress?.(i, slides.length)
@@ -72,6 +86,8 @@ export async function exportAllAsZip(slides, layouts, photosById, { width, heigh
       look,
       tilt,
       radius,
+      border,
+      caption: captions?.get(slides[i].key) ?? null,
     })
     zip.file(slideFileName(i), blob)
   }

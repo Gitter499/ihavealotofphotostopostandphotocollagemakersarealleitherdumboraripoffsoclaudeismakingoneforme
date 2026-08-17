@@ -97,6 +97,7 @@ function runImport(list, { onPhoto, onSkip, onProgress }) {
             sat: msg.sat,
             luma: msg.luma,
             contrast: msg.contrast,
+            focal: msg.focal,
           })
           finishOne()
           feed(worker)

@@ -869,7 +869,9 @@ input[type='range']::-moz-range-thumb {
 
 @media (prefers-reduced-motion: no-preference) {
   .options-popover,
-  .size-popover {
+  .size-popover,
+  .tpl-popover,
+  .cap-popover {
     animation: popover-in 320ms var(--ease-spring);
   }
 }
@@ -1205,6 +1207,106 @@ body[data-dragging='1'] .mesh-link {
   .tray-thumb {
     animation: bubble-in 360ms var(--ease-spring) backwards;
   }
+}
+
+/* ---------- template picker + caption editor ---------- */
+
+.tpl-popover,
+.cap-popover {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-xl);
+  width: 304px;
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+}
+
+.cap-popover {
+  width: 280px;
+}
+
+.tpl-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+
+.tpl-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 4px;
+  border-radius: var(--radius-md);
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.tpl-option:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.tpl-option.active {
+  background: rgba(10, 132, 255, 0.18);
+  outline: 1.5px solid rgba(10, 132, 255, 0.6);
+}
+
+/* miniature of the template: cells as outlined boxes */
+.tpl-preview {
+  position: relative;
+  width: 56px;
+  display: block;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.tpl-cell {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.28);
+  outline: 1px solid rgba(13, 13, 16, 0.9);
+  border-radius: 1px;
+}
+
+.tpl-auto {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 5;
+  font-size: 22px;
+  color: var(--label-secondary);
+}
+
+.tpl-name {
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 550;
+  color: var(--label-secondary);
+  letter-spacing: 0.02em;
+}
+
+.tpl-option.active .tpl-name {
+  color: var(--label-primary);
+}
+
+.cap-input {
+  appearance: none;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--label-primary);
+  font-family: var(--font-display);
+  font-size: var(--text-subhead);
+  font-weight: 600;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  outline: none;
+}
+
+.cap-input:focus {
+  border-color: rgba(10, 132, 255, 0.6);
 }
 
 /* ---------- tap-to-resize popover ---------- */

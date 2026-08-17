@@ -123,7 +123,61 @@ function analyze(bmp) {
     if (i < 32) hi = ((hi << 1) | bit) >>> 0
     else lo = ((lo << 1) | bit) >>> 0
   }
-  return { quality, hash: [hi, lo], hue, sat, luma: mean / 255, contrast }
+
+  // Saliency → focal point. Center-surround contrast (each pixel against its
+  // wide neighbourhood, via an integral image) plus colour pop against the
+  // image mean, damped toward the frame's centre so borders can't win. The
+  // saliency-weighted centroid of the strongest fifth of pixels is where the
+  // subject most likely is; crops slide toward it everywhere in the app.
+  const integ = new Float64Array((S + 1) * (S + 1))
+  for (let y = 0; y < S; y++) {
+    let row = 0
+    for (let x = 0; x < S; x++) {
+      row += luma[y * S + x]
+      integ[(y + 1) * (S + 1) + (x + 1)] = integ[y * (S + 1) + (x + 1)] + row
+    }
+  }
+  const boxMean = (x0, y0, x1, y1) => {
+    const a = integ[y0 * (S + 1) + x0]
+    const b = integ[y0 * (S + 1) + x1]
+    const c = integ[y1 * (S + 1) + x0]
+    const e = integ[y1 * (S + 1) + x1]
+    return (e - b - c + a) / ((x1 - x0) * (y1 - y0))
+  }
+  const rMean = rSum / (S * S)
+  const gMean = gSum / (S * S)
+  const bMean = bSum / (S * S)
+  const R = 12 // surround radius
+  const sal = new Float32Array(S * S)
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const i = y * S + x
+      const surround = boxMean(Math.max(0, x - R), Math.max(0, y - R), Math.min(S, x + R + 1), Math.min(S, y + R + 1))
+      const colorPop =
+        (Math.abs(d[i * 4] - rMean) + Math.abs(d[i * 4 + 1] - gMean) + Math.abs(d[i * 4 + 2] - bMean)) / 3
+      const dx = x / (S - 1) - 0.5
+      const dy = y / (S - 1) - 0.5
+      const centerPrior = 1 - 0.55 * Math.sqrt(dx * dx + dy * dy) * 2
+      sal[i] = (0.65 * Math.abs(luma[i] - surround) + 0.35 * colorPop) * centerPrior
+    }
+  }
+  const sorted = Float32Array.from(sal).sort()
+  const cut = sorted[Math.floor(S * S * 0.8)]
+  let wSum = 0
+  let fx = 0
+  let fy = 0
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const v = sal[y * S + x]
+      if (v < cut) continue
+      wSum += v
+      fx += v * (x + 0.5)
+      fy += v * (y + 0.5)
+    }
+  }
+  const focal = wSum > 0 ? { x: fx / wSum / S, y: fy / wSum / S } : { x: 0.5, y: 0.5 }
+
+  return { quality, hash: [hi, lo], hue, sat, luma: mean / 255, contrast, focal }
 }
 
 async function process(id, blob, name, date) {
@@ -176,6 +230,7 @@ async function process(id, blob, name, date) {
         sat: metrics.sat,
         luma: metrics.luma,
         contrast: metrics.contrast,
+        focal: metrics.focal,
       },
       [preview],
     )
