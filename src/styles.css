@@ -208,7 +208,7 @@ body {
   flex-direction: column;
   min-height: 100vh;
   min-height: 100dvh;
-  padding: 0 max(var(--space-4), env(safe-area-inset-left)) calc(210px + env(safe-area-inset-bottom))
+  padding: 0 max(var(--space-4), env(safe-area-inset-left)) calc(120px + env(safe-area-inset-bottom))
     max(var(--space-4), env(safe-area-inset-right));
 }
 
@@ -277,7 +277,13 @@ body {
   max-width: 100%;
 }
 
-/* the filter strip — swipeable row of preview bubbles */
+/* the filter strip — swipeable row of preview bubbles, up top */
+.filterbar-row {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--space-4);
+}
+
 .filterbar {
   display: flex;
   align-items: flex-start;
@@ -404,6 +410,16 @@ body {
 
 .dock-progress {
   font-variant-numeric: tabular-nums;
+  font-size: var(--text-subhead);
+  font-weight: 600;
+}
+
+.dock-btn-wide {
+  width: auto;
+  padding: 0 var(--space-4);
+  gap: 7px;
+  font-size: var(--text-subhead);
+  font-weight: 600;
 }
 
 .dock-btn:hover:not(:disabled) {
@@ -754,7 +770,7 @@ input[type='range']::-moz-range-thumb {
 
 .options-popover {
   position: fixed;
-  bottom: calc(200px + env(safe-area-inset-bottom));
+  bottom: calc(92px + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   z-index: 70;

@@ -20,6 +20,7 @@
   "devDependencies": {
     "@playwright/mcp": "^0.0.79",
     "@vitejs/plugin-react": "^4.3.4",
+    "opentype.js": "^2.0.0",
     "playwright-core": "^1.49.0",
     "vite": "^6.0.7"
   }

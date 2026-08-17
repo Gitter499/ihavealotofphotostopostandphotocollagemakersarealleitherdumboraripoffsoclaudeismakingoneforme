@@ -516,6 +516,9 @@ export default function App() {
         </div>
       ) : (
         <>
+          <div className="filterbar-row">
+            <FilterBar photo={photos.values().next().value} look={look} setLook={setLook} />
+          </div>
           {busyImporting && (
             <div className="importing-inline">
               Reading {importState.done}/{importState.total}…
@@ -724,7 +727,6 @@ export default function App() {
 
       {hasPhotos && (
         <div className="bottom-cluster">
-          <FilterBar photo={photos.values().next().value} look={look} setLook={setLook} />
           <nav className="dock glass-thick" aria-label="Actions">
             <button
               className="dock-btn"
@@ -754,7 +756,7 @@ export default function App() {
               <Glyph size={19} d="M2.5 5h6M11.5 5h2M2.5 11h2M7.5 11h6M9.5 3v4M4.5 9v4" />
             </button>
             <button
-              className="dock-btn dock-btn-primary"
+              className="dock-btn dock-btn-primary dock-btn-wide"
               onClick={downloadAll}
               disabled={busyImporting || !!exportState}
               aria-label="Download all"
@@ -762,10 +764,15 @@ export default function App() {
             >
               {exportState ? (
                 <span className="dock-progress">
-                  {exportState.done < exportState.total ? `${exportState.done + 1}/${exportState.total}` : '…'}
+                  {exportState.done < exportState.total
+                    ? `Rendering ${exportState.done + 1}/${exportState.total}`
+                    : 'Zipping…'}
                 </span>
               ) : (
-                <Glyph size={19} d="M8 2.5v7.5m0 0 3-3m-3 3-3-3M3 13.5h10" />
+                <>
+                  <Glyph size={17} d="M8 2.5v7.5m0 0 3-3m-3 3-3-3M3 13.5h10" />
+                  <span>Download all</span>
+                </>
               )}
             </button>
           </nav>
