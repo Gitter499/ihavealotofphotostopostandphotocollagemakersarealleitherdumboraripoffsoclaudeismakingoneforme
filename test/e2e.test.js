@@ -360,6 +360,26 @@ try {
   assert.equal(await page.locator('.slide-empty').count(), 0, 'stepper should pull a photo into the new slide')
   console.log('  ok  skeleton + card adds a slide; its stepper pulls a photo in')
 
+  // delete that slide — it and its photo leave the workspace
+  await page.locator('[aria-label="Delete this slide"]').last().click()
+  await page.waitForTimeout(300)
+  assert.equal(await page.locator('.slide-card').count(), slidesBefore, 'deleted slide should be gone')
+  assert.match(await page.locator('.counts').textContent(), /29 photos/, 'deleted slide takes its photo with it')
+  console.log('  ok  delete slide removes it and its photos')
+
+  // tilt + corner rounding restyle the composition (preview pixels change)
+  await openOptions()
+  const plain = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  await page.locator('input[type="range"]').nth(2).fill('5')
+  await page.locator('input[type="range"]').nth(3).fill('20')
+  await page.waitForTimeout(400)
+  const styled = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  assert.notEqual(plain, styled, 'tilt/corners did not change the render')
+  await page.locator('input[type="range"]').nth(2).fill('0')
+  await page.locator('input[type="range"]').nth(3).fill('0')
+  await closeOptions()
+  console.log('  ok  tilt and corner sliders restyle the slides')
+
   // 200-photo stress: import must complete and stay responsive
   const many = []
   for (let i = 0; i < 200; i++) {
@@ -369,7 +389,7 @@ try {
   }
   const t0 = Date.now()
   await page.setInputFiles('[data-testid="file-input"]', many)
-  await page.waitForFunction(() => /230 photos/.test(document.querySelector('.counts')?.textContent || ''), null, {
+  await page.waitForFunction(() => /229 photos/.test(document.querySelector('.counts')?.textContent || ''), null, {
     timeout: 120000,
   })
   const elapsed = Date.now() - t0
@@ -381,7 +401,7 @@ try {
   const r0 = Date.now()
   await page.evaluate(() => 1 + 1)
   assert.ok(Date.now() - r0 < 1000, 'main thread blocked after bulk import')
-  console.log(`  ok  230 photos imported in ${(elapsed / 1000).toFixed(1)}s, clamped to 20 slides, tab responsive`)
+  console.log(`  ok  229 photos imported in ${(elapsed / 1000).toFixed(1)}s, clamped to 20 slides, tab responsive`)
 
   await page.screenshot({ path: join(tmp, 'app.png'), fullPage: false })
   console.log('\nAll e2e tests passed')

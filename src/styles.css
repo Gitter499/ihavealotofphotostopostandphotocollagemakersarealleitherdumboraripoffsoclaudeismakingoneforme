@@ -884,6 +884,11 @@ input[type='range']::-moz-range-thumb {
   cursor: default;
 }
 
+.icon-btn-danger:hover:not(:disabled) {
+  color: #ff6961;
+  background: rgba(255, 69, 58, 0.14);
+}
+
 .slide-canvas {
   display: block;
   width: 100%;

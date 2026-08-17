@@ -34,7 +34,7 @@ async function decodeFiltered(photo, look) {
   return canvas
 }
 
-export async function renderSlideBlob(slide, rects, photosById, { width, height, bg, look }) {
+export async function renderSlideBlob(slide, rects, photosById, { width, height, bg, look, tilt = 0, radius = 0 }) {
   const images = new Map()
   try {
     await Promise.all(
@@ -47,7 +47,7 @@ export async function renderSlideBlob(slide, rects, photosById, { width, height,
     const ctx = canvas.getContext('2d')
     ctx.imageSmoothingQuality = 'high'
     ctx.scale(EXPORT_SCALE, EXPORT_SCALE)
-    drawSlide(ctx, { width, height, bg, photoIds: slide.photoIds, rects, images })
+    drawSlide(ctx, { width, height, bg, photoIds: slide.photoIds, rects, images, tilt, radius })
     return await canvas.convertToBlob({ type: 'image/jpeg', quality: EXPORT_QUALITY })
   } finally {
     for (const img of images.values()) img.close?.()
@@ -58,11 +58,18 @@ export function slideFileName(index) {
   return String(index + 1).padStart(2, '0') + '.jpg'
 }
 
-export async function exportAllAsZip(slides, layouts, photosById, { width, height, bgs, look }, onProgress) {
+export async function exportAllAsZip(slides, layouts, photosById, { width, height, bgs, look, tilt, radius }, onProgress) {
   const zip = new JSZip()
   for (let i = 0; i < slides.length; i++) {
     onProgress?.(i, slides.length)
-    const blob = await renderSlideBlob(slides[i], layouts[i].rects, photosById, { width, height, bg: bgs[i], look })
+    const blob = await renderSlideBlob(slides[i], layouts[i].rects, photosById, {
+      width,
+      height,
+      bg: bgs[i],
+      look,
+      tilt,
+      radius,
+    })
     zip.file(slideFileName(i), blob)
   }
   onProgress?.(slides.length, slides.length)

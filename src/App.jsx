@@ -36,6 +36,8 @@ export default function App() {
   const [gutter, setGutter] = useState(8)
   const [bgMode, setBgMode] = useState('dark')
   const [look, setLook] = useState('auto')
+  const [tilt, setTilt] = useState(0) // degrees of per-photo lean
+  const [cornerRadius, setCornerRadius] = useState(0)
   const [aspect, setAspect] = useState('4:5')
   const [importState, setImportState] = useState(null) // {done, total}
   const [skipped, setSkipped] = useState([])
@@ -233,6 +235,20 @@ export default function App() {
     setSlides((prev) => prev.map((s) => ({ ...s, seed: randomSeed(), swaps: [] })))
   }
 
+  // Delete a slide outright — its photos leave the workspace with it.
+  const deleteSlide = (i) => {
+    const removed = slides[i]
+    if (!removed) return
+    setSlides((prev) => prev.filter((_, j) => j !== i))
+    if (removed.photoIds.length) {
+      setPhotos((prev) => {
+        const next = new Map(prev)
+        for (const id of removed.photoIds) next.delete(id)
+        return next
+      })
+    }
+  }
+
   const addEmptySlide = () => {
     setSlides((prev) =>
       prev.length >= MAX_SLIDES ? prev : [...prev, { key: `s${slideKeyCounter++}`, photoIds: [], seed: randomSeed() }],
@@ -376,7 +392,7 @@ export default function App() {
         filled.map((x) => x.s),
         filled.map((x) => x.layout),
         photos,
-        { ...exportOpts, bgs: filled.map((x) => x.bg), look },
+        { ...exportOpts, bgs: filled.map((x) => x.bg), look, tilt, radius: cornerRadius },
         (done, total) => setExportState({ done, total }),
       )
       saveBlob(zip, 'carousel.zip')
@@ -392,6 +408,8 @@ export default function App() {
       ...exportOpts,
       bg: slideBgs[i],
       look,
+      tilt,
+      radius: cornerRadius,
     })
     saveBlob(blob, slideFileName(i))
   }
@@ -584,6 +602,14 @@ export default function App() {
                     >
                       <Glyph d="M8 2.5v7.5m0 0 3-3m-3 3-3-3M3 13.5h10" />
                     </button>
+                    <button
+                      className="icon-btn icon-btn-danger"
+                      onClick={() => deleteSlide(i)}
+                      aria-label="Delete this slide"
+                      title="Delete this slide (removes its photos)"
+                    >
+                      <Glyph d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+                    </button>
                   </span>
                 </div>
                 {slide.photoIds.length === 0 ? (
@@ -599,6 +625,8 @@ export default function App() {
                     canvasH={canvasH}
                     bg={slideBgs[i]}
                     imagesOverride={lookImages}
+                    tilt={tilt}
+                    radius={cornerRadius}
                     animKey={`${slide.key}:${slide.seed}:${slide.photoIds.join(',')}:${aspect}:${gutter}:${(slide.swaps ?? []).length}`}
                     onPhotoPointerDown={(e, photoId) => startPhotoDrag(e, slide.key, photoId)}
                   />
@@ -647,6 +675,24 @@ export default function App() {
                 Gutter <b>{gutter}px</b>
               </span>
               <input type="range" min="0" max="24" value={gutter} onChange={(e) => setGutter(Number(e.target.value))} />
+            </label>
+            <label className="control">
+              <span className="control-label">
+                Tilt <b>{tilt}°</b>
+              </span>
+              <input type="range" min="0" max="6" value={tilt} onChange={(e) => setTilt(Number(e.target.value))} />
+            </label>
+            <label className="control">
+              <span className="control-label">
+                Corners <b>{cornerRadius}px</b>
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="28"
+                value={cornerRadius}
+                onChange={(e) => setCornerRadius(Number(e.target.value))}
+              />
             </label>
             <div className="control">
               <span className="control-label">Background</span>

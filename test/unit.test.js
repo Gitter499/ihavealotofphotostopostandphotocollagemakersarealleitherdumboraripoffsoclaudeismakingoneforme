@@ -12,6 +12,7 @@ import {
   adjustGroupSize,
 } from '../src/lib/grouping.js'
 import { matrixFor, applyMatrix } from '../src/lib/filters.js'
+import { tiltAngle } from '../src/lib/render.js'
 import { computeLayout, cropLoss, MAX_CROP_LOSS } from '../src/lib/layout.js'
 import { mulberry32 } from '../src/lib/rng.js'
 
@@ -314,6 +315,21 @@ test('filters: Noir is truly neutral, Film warms, identity holds', () => {
 test('filters: a well-exposed photo passes through Auto almost untouched', () => {
   const out = runPixel({ luma: 0.52, contrast: 0.5 }, 'auto', [128, 128, 128])
   for (const v of out) assert.ok(Math.abs(v - 128) <= 8, `auto shifted a good photo too far: ${out}`)
+})
+
+// ---------- tilt ----------
+
+test('tiltAngle is deterministic, bounded, zero when off', () => {
+  assert.equal(tiltAngle(42, 0), 0)
+  assert.equal(tiltAngle(42, 4), tiltAngle(42, 4))
+  const max = (6 * Math.PI) / 180
+  const angles = new Set()
+  for (let id = 1; id <= 40; id++) {
+    const a = tiltAngle(id, 6)
+    assert.ok(Math.abs(a) <= max + 1e-9, `angle out of range: ${a}`)
+    angles.add(a.toFixed(5))
+  }
+  assert.ok(angles.size > 20, 'photos should lean by different amounts')
 })
 
 // ---------- dynamic (Auto) grouping ----------
