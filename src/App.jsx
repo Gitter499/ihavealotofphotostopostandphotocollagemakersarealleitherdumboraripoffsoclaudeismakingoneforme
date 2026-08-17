@@ -1329,7 +1329,7 @@ export default function App() {
             </div>
           )}
           <div className="dock-row">
-            <span className="counts dock-stats glass-thick" aria-live="polite">
+            <span className="counts dock-stats" aria-live="polite">
               {photos.size}
               <span className="cw"> photos</span>
               {' · '}
@@ -1343,7 +1343,7 @@ export default function App() {
                 </>
               )}
             </span>
-            <nav className="dock glass-thick" aria-label="Actions">
+            <nav className="dock" aria-label="Actions">
             <button
               className="dock-btn"
               onClick={() => fileInputRef.current?.click()}

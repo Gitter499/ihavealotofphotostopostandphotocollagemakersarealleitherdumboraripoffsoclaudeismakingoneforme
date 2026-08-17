@@ -280,9 +280,14 @@ canvas {
   transition: opacity var(--duration-fast) var(--ease-out);
 }
 
+/* One continuous “p”: bar and tally lobe share the same near-opaque glass,
+   join flush with concave fillets, and the outline/shadow is drawn once
+   around the union silhouette by the wrapper's drop-shadows. */
 .dock-row {
   position: relative;
   max-width: 100%;
+  --dock-bg: rgba(30, 30, 36, 0.94);
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.22)) drop-shadow(0 8px 32px rgba(0, 0, 0, 0.45));
 }
 
 .dock {
@@ -294,26 +299,50 @@ canvas {
   padding: 6px;
   border-radius: var(--radius-full);
   max-width: 100%;
+  background: var(--dock-bg);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  backdrop-filter: blur(40px) saturate(200%);
 }
 
-/* the tally lobe of the “p” — a capsule rising from the dock's top edge,
-   its lower half tucked behind the bar so the two read as one silhouette */
+/* the tally lobe — flush against the bar's top edge, same skin, so the two
+   read as one shape; square bottom corners meet the bar, fillets soften it */
 .dock-stats {
   position: absolute;
-  bottom: calc(100% - 14px);
-  left: 22px;
+  bottom: calc(100% - 2px);
+  left: 26px;
   z-index: 0;
   display: inline-block;
-  line-height: 26px;
-  height: 40px;
-  padding: 0 16px;
-  border-radius: var(--radius-full);
+  line-height: 30px;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 15px 15px 0 0;
   color: var(--label-secondary);
   font-size: var(--text-caption1);
   white-space: nowrap;
-  max-width: calc(100% - 44px);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: calc(100% - 52px);
+  overflow: visible;
+  background: var(--dock-bg);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  backdrop-filter: blur(40px) saturate(200%);
+}
+
+.dock-stats::before,
+.dock-stats::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  width: 10px;
+  height: 10px;
+}
+
+.dock-stats::before {
+  left: -10px;
+  background: radial-gradient(circle at 0 0, transparent 10px, var(--dock-bg) 10.5px);
+}
+
+.dock-stats::after {
+  right: -10px;
+  background: radial-gradient(circle at 100% 0, transparent 10px, var(--dock-bg) 10.5px);
 }
 
 @media (max-width: 640px) {
