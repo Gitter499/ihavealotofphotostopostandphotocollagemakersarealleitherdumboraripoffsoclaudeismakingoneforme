@@ -140,9 +140,10 @@ shots.desktop = await desktop.screenshot()
 // desktop, tilt + rounded corners
 await desktop.getByRole('button', { name: 'Options' }).click()
 await desktop.waitForTimeout(350)
-await desktop.locator('input[type="range"]').nth(2).fill('4')
-await desktop.locator('input[type="range"]').nth(3).fill('18')
-await desktop.locator('input[type="range"]').nth(1).fill('12')
+// scoped to the popover: page-level sliders (filter strength) shift nth indexes
+await desktop.locator('.options-popover input[type="range"]').nth(2).fill('4')
+await desktop.locator('.options-popover input[type="range"]').nth(3).fill('18')
+await desktop.locator('.options-popover input[type="range"]').nth(1).fill('12')
 await desktop.keyboard.press('Escape')
 await desktop.waitForTimeout(600)
 shots.scrapbook = await desktop.screenshot()
