@@ -281,8 +281,7 @@ canvas {
 }
 
 .dock-row {
-  display: flex;
-  align-items: center;
+  position: relative;
   max-width: 100%;
 }
 
@@ -297,18 +296,22 @@ canvas {
   max-width: 100%;
 }
 
-/* the tally lobe of the “p” — a slimmer capsule emerging from the dock */
+/* the tally lobe of the “p” — a capsule rising from the dock's top edge,
+   its lower half tucked behind the bar so the two read as one silhouette */
 .dock-stats {
+  position: absolute;
+  bottom: calc(100% - 14px);
+  left: 22px;
+  z-index: 0;
   display: inline-block;
-  line-height: 38px;
+  line-height: 26px;
   height: 40px;
-  margin-right: -26px;
-  padding: 0 34px 0 16px;
+  padding: 0 16px;
   border-radius: var(--radius-full);
   color: var(--label-secondary);
   font-size: var(--text-caption1);
   white-space: nowrap;
-  flex: 0 1 auto;
+  max-width: calc(100% - 44px);
   overflow: hidden;
   text-overflow: ellipsis;
 }

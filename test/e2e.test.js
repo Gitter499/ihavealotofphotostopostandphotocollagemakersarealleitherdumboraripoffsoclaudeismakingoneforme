@@ -752,9 +752,14 @@ try {
   await page.waitForTimeout(400)
   const countsBox = await page.locator('.counts').boundingBox()
   const dockBox = await page.locator('.dock').boundingBox()
+  // the lobe rises from the bar: it starts above the dock's top edge and its
+  // lower half overlaps behind it — one fused silhouette
   assert.ok(
-    countsBox && Math.abs(countsBox.y + countsBox.height / 2 - (dockBox.y + dockBox.height / 2)) < 16,
-    `the tally should ride fused to the dock (${JSON.stringify({ countsBox, dockBox })})`,
+    countsBox &&
+      countsBox.y < dockBox.y &&
+      countsBox.y + countsBox.height > dockBox.y &&
+      countsBox.y + countsBox.height < dockBox.y + dockBox.height,
+    `the tally lobe should rise fused from the dock's top (${JSON.stringify({ countsBox, dockBox })})`,
   )
   assert.ok(countsBox.x >= 0 && dockBox.x + dockBox.width <= 391, 'the fused bar must fit the phone width')
 
