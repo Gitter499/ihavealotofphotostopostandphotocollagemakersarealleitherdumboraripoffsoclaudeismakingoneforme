@@ -123,6 +123,11 @@ const loadWithPhotos = async (page, count) => {
     { timeout: 60000 },
   )
   await page.waitForTimeout(1400)
+  // first-run coach marks would photobomb every shot
+  if (await page.locator('.hints-card').count()) {
+    await page.getByRole('button', { name: 'Got it' }).click()
+    await page.waitForTimeout(400)
+  }
 }
 
 const shots = {}

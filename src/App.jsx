@@ -39,6 +39,9 @@ import {
   CaretDownIcon,
   CaretLeftIcon,
   CaretRightIcon,
+  HandTapIcon,
+  ArrowsOutCardinalIcon,
+  SparkleIcon,
 } from '@phosphor-icons/react'
 
 const BG_SWATCHES = [
@@ -96,6 +99,7 @@ export default function App() {
   const [captions, setCaptions] = useState(() => new Map()) // slideKey → {text, pos}
   const [capEdit, setCapEdit] = useState(null) // {slideKey, x, y} — caption editor
   const [moreEdit, setMoreEdit] = useState(null) // {slideKey} — mobile ⋯ action sheet
+  const [showHints, setShowHints] = useState(false) // first-run coach marks
   const [borderW, setBorderW] = useState(0) // px stroke around every photo
   const [borderColor, setBorderColor] = useState('#ffffff')
   const [aspect, setAspect] = useState('4:5')
@@ -279,6 +283,25 @@ export default function App() {
       next.delete(photoId)
       return next
     })
+  }
+
+  // First photos ever → one round of coach marks, never again after that.
+  useEffect(() => {
+    try {
+      if (!restoring && photos.size > 0 && !localStorage.getItem('pg-hints-seen')) setShowHints(true)
+    } catch {
+      // storage blocked — just skip the hints
+    }
+  }, [restoring, photos])
+
+  const dismissHints = () => {
+    haptics.tap()
+    try {
+      localStorage.setItem('pg-hints-seen', '1')
+    } catch {
+      // fine — they may see the card once more
+    }
+    setShowHints(false)
   }
 
   // Start over: wipe the stored session and the workspace together.
@@ -1347,6 +1370,28 @@ export default function App() {
               )}
             </button>
           </nav>
+        </div>
+      )}
+
+      {showHints && (
+        <div className="hints-scrim" onClick={dismissHints}>
+          <div className="hints-card glass-thick" role="dialog" aria-label="How it works" onClick={(e) => e.stopPropagation()}>
+            <span className="control-label">How it works</span>
+            {[
+              { Icon: HandTapIcon, text: 'Tap any photo to resize it or slide its crop around.' },
+              { Icon: ArrowsOutCardinalIcon, text: 'Drag photos between slides — or park them on the playground shelf below.' },
+              { Icon: LinkSimpleIcon, text: 'Tap the link between two slides and a photo will flow across the seam.' },
+              { Icon: SparkleIcon, text: 'The dots up top are filters. Point at them to preview, tap to apply.' },
+            ].map(({ Icon, text }) => (
+              <div key={text} className="hint-row">
+                <Icon size={22} weight="duotone" />
+                <span>{text}</span>
+              </div>
+            ))}
+            <button className="dock-btn dock-btn-primary dock-btn-wide hints-done" onClick={dismissHints}>
+              Got it
+            </button>
+          </div>
         </div>
       )}
 

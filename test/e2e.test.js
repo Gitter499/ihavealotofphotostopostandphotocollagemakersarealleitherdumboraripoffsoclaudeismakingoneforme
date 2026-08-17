@@ -155,6 +155,13 @@ try {
     { timeout: 30000 },
   )
 
+  // first-run coach marks appear exactly once, then never again
+  await page.locator('.hints-card').waitFor({ state: 'visible', timeout: 5000 })
+  await page.getByRole('button', { name: 'Got it' }).click()
+  await page.waitForTimeout(300)
+  assert.equal(await page.locator('.hints-card').count(), 0, 'hints should dismiss')
+  console.log('  ok  first-run coach marks show once and dismiss')
+
   // Auto mode (default): slide count adapts to the photos
   const autoSlides = await page.locator('.slide-card').count()
   assert.ok(autoSlides >= 4 && autoSlides <= 8, `auto grouping made ${autoSlides} slides for 30 photos`)
@@ -694,6 +701,7 @@ try {
   await page.locator('.cap-input').fill('')
   await page.keyboard.press('Escape')
   await page.waitForTimeout(1200)
+  assert.equal(await page.locator('.hints-card').count(), 0, 'hints must not reappear after reload')
   console.log('  ok  reload restores the whole session from IndexedDB')
 
   // keyboard: R remixes without touching the mouse (typing guard is covered
