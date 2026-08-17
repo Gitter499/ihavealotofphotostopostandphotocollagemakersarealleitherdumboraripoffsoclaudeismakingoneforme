@@ -15,6 +15,7 @@ import { fireConfetti } from './lib/confetti.js'
 import { exportAllAsZip, renderSlideBlob, slideFileName, saveBlob } from './lib/exportZip.js'
 import { remixPlan } from './lib/remix.js'
 import { randomSeed } from './lib/rng.js'
+import { tiltAngle } from './lib/render.js'
 import SlideCanvas from './components/SlideCanvas.jsx'
 import Logo from './components/Logo.jsx'
 import Wordmark from './components/Wordmark.jsx'
@@ -37,6 +38,19 @@ const BG_SWATCHES = [
 ]
 
 let slideKeyCounter = 1
+
+// Non-modal popovers: a pointerdown anywhere `isInside` doesn't claim closes
+// them, and the touch still lands on whatever was touched.
+function useDismiss(active, isInside, close) {
+  useEffect(() => {
+    if (!active) return
+    const onDown = (e) => {
+      if (!isInside(e)) close()
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => document.removeEventListener('pointerdown', onDown, true)
+  }, [active]) // eslint-disable-line react-hooks/exhaustive-deps
+}
 
 // Stable per-position base seed so re-grouping (e.g. gutter change) doesn't
 // silently reshuffle layouts the user already liked.
@@ -61,9 +75,9 @@ export default function App() {
   const [exportState, setExportState] = useState(null) // {done, total}
   const [optionsOpen, setOptionsOpen] = useState(false)
   const [drag, setDrag] = useState(null) // {photoId, fromKey, x, y, overKey}
+  const [hoverSeam, setHoverSeam] = useState(null) // seam index under the pointer — previews the join
   const [tray, setTray] = useState([]) // playground: photo ids set aside from every slide
   const fileInputRef = useRef(null)
-  const dragRef = useRef(null)
   const trayRef = useRef(tray)
   trayRef.current = tray
 
@@ -124,30 +138,14 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // The size popover follows the same non-modal rule as the toolbox: touching
-  // anything else dismisses it (the touch still lands where it was aimed).
-  useEffect(() => {
-    if (!sizeEdit) return
-    const onDown = (e) => {
-      if (e.target.closest?.('.size-popover')) return
-      setSizeEdit(null)
-    }
-    document.addEventListener('pointerdown', onDown, true)
-    return () => document.removeEventListener('pointerdown', onDown, true)
-  }, [sizeEdit])
 
-  // The popover is non-modal: touching anything outside it — a slide, a
-  // photo drag, the canvas — hides the toolbox, and the touch still lands
-  // on whatever was touched. The dock and filter strip don't dismiss it.
-  useEffect(() => {
-    if (!optionsOpen) return
-    const onDown = (e) => {
-      if (e.target.closest?.('.options-popover') || e.target.closest?.('.bottom-cluster')) return
-      setOptionsOpen(false)
-    }
-    document.addEventListener('pointerdown', onDown, true)
-    return () => document.removeEventListener('pointerdown', onDown, true)
-  }, [optionsOpen])
+  // the dock itself doesn't dismiss the toolbox — its buttons stay usable
+  useDismiss(
+    optionsOpen,
+    (e) => e.target.closest?.('.options-popover') || e.target.closest?.('.bottom-cluster'),
+    () => setOptionsOpen(false),
+  )
+  useDismiss(!!sizeEdit, (e) => e.target.closest?.('.size-popover'), () => setSizeEdit(null))
 
   // Accept drops anywhere on the page.
   useEffect(() => {
@@ -169,13 +167,13 @@ export default function App() {
     if (photos.size) recompose(photos, per)
   }
 
-  const handleAspect = (a) => setAspect(a)
-
   const BRIDGE_STRIP = 300 // width (in 1080-space) each slide gives to a seam photo
 
   const seamKey = (i) => (slides[i + 1] ? `${slides[i].key}|${slides[i + 1].key}` : null)
 
+  const layoutCache = useRef(new Map())
   const layouts = useMemo(() => {
+    const nextCache = new Map()
     // Mesh planning: each seam is its own switch. For every meshed seam
     // between adjacent filled slides, pick a boundary photo (the more
     // portrait of the pair's tail/head) to span it.
@@ -200,7 +198,7 @@ export default function App() {
       }
     }
 
-    return slides.map((s, i) => {
+    const result = slides.map((s, i) => {
       const leftBridge = i > 0 ? bridgeAfter[i - 1] : null
       const rightBridge = bridgeAfter[i]
       const leftStrip = leftBridge ? BRIDGE_STRIP : 0
@@ -210,22 +208,24 @@ export default function App() {
       )
       const innerIds = s.photoIds.filter((id) => !ownedBridgeIds.has(id))
       const eff = effectiveQualities(innerIds, (id) => photos.get(id))
-      // tap-to-resize: a boosted photo pulls a matching share of the canvas,
-      // and its boosted "quality" steers the bigger slot its way too
+      // tap-to-resize: a boosted photo pulls a matching share of the canvas
       const boosts = innerIds.map((id) => sizeBoosts.get(id) ?? 1)
-      const anyBoost = boosts.some((b) => b !== 1)
-      const inner = computeLayout(
-        innerIds.map((id) => photos.get(id)?.aspect ?? 1),
-        {
-          canvasW: canvasW - leftStrip - rightStrip,
-          canvasH,
-          margin,
-          gutter,
-          baseSeed: s.seed,
-          qualities: innerIds.map((id, j) => (eff.get(id) ?? 0.5) * boosts[j]),
-          weights: anyBoost ? boosts : null,
-        },
-      )
+      const quals = innerIds.map((id) => eff.get(id) ?? 0.5)
+      const opts = {
+        canvasW: canvasW - leftStrip - rightStrip,
+        canvasH,
+        margin,
+        gutter,
+        baseSeed: s.seed,
+        qualities: quals,
+        weights: boosts.some((b) => b !== 1) ? boosts : null,
+      }
+      // per-slide cache: dragging one photo's size slider only relays out
+      // the slide that actually changed
+      const cacheKey = JSON.stringify([s.key, innerIds, boosts, quals, opts.canvasW, canvasH, margin, gutter, s.seed])
+      const inner =
+        layoutCache.current.get(cacheKey) ?? computeLayout(innerIds.map((id) => photos.get(id)?.aspect ?? 1), opts)
+      nextCache.set(cacheKey, inner)
       const rectById = new Map(
         innerIds.map((id, j) => [
           id,
@@ -252,6 +252,8 @@ export default function App() {
         bridges.push({ id: rightBridge.id, rect: { x: canvasW - rightStrip, y: 0, w: rightStrip, h: canvasH }, half: 'left' })
       return { ...inner, rects, bridges }
     })
+    layoutCache.current = nextCache
+    return result
   }, [slides, photos, canvasW, canvasH, margin, gutter, meshSeams, sizeBoosts])
 
   const toggleSeam = (i) => {
@@ -426,45 +428,25 @@ export default function App() {
     })
   }
 
-  const movePhoto = (photoId, fromKey, toKey) => {
-    setSlides((prev) => {
-      const from = prev.find((s) => s.key === fromKey)
-      const to = prev.find((s) => s.key === toKey)
-      if (!from || !to || from === to) return prev
-      const next = prev
+  // ---- playground: a shelf where photos sit out of every slide ----
+  const TRAY_KEY = '__tray__'
+
+  // Move a photo anywhere: slide → slide, slide → playground, playground →
+  // slide. A drained source slide folds away, but deliberately added empty
+  // slides stay put, waiting for photos.
+  const relocatePhoto = (photoId, toKey) => {
+    const fromKey = slidesRef.current.find((s) => s.photoIds.includes(photoId))?.key ?? TRAY_KEY
+    if (fromKey === toKey) return
+    setTray((prev) => (toKey === TRAY_KEY ? [...prev, photoId] : prev.filter((id) => id !== photoId)))
+    setSlides((prev) =>
+      prev
         .map((s) => {
           if (s.key === fromKey)
             return { ...s, photoIds: s.photoIds.filter((id) => id !== photoId), seed: randomSeed() }
           if (s.key === toKey) return { ...s, photoIds: [...s.photoIds, photoId], seed: randomSeed() }
           return s
         })
-        // only the drained source slide folds away — deliberately added empty
-        // slides stay put, waiting for photos
-        .filter((s) => s.photoIds.length > 0 || s.key !== fromKey)
-      return next
-    })
-  }
-
-  // ---- playground: a shelf where photos sit out of every slide ----
-  const TRAY_KEY = '__tray__'
-
-  const movePhotoToTray = (photoId, fromKey) => {
-    setSlides((prev) =>
-      prev
-        .map((s) =>
-          s.key === fromKey
-            ? { ...s, photoIds: s.photoIds.filter((id) => id !== photoId), seed: randomSeed() }
-            : s,
-        )
         .filter((s) => s.photoIds.length > 0 || s.key !== fromKey),
-    )
-    setTray((prev) => (prev.includes(photoId) ? prev : [...prev, photoId]))
-  }
-
-  const movePhotoFromTray = (photoId, toKey) => {
-    setTray((prev) => prev.filter((id) => id !== photoId))
-    setSlides((prev) =>
-      prev.map((s) => (s.key === toKey ? { ...s, photoIds: [...s.photoIds, photoId], seed: randomSeed() } : s)),
     )
   }
 
@@ -532,18 +514,15 @@ export default function App() {
         const el = document.elementFromPoint(ev.clientX, ev.clientY)
         const card = el?.closest?.('[data-slide-key]')
         const toKey = card?.dataset.slideKey
-        const overTray = !!el?.closest?.('.playground')
         const fromTray = trayRef.current.includes(photoId)
         // a seam bridge can be drawn on its neighbour's canvas — resolve the
         // slide that actually owns the photo before deciding move vs swap
         const ownerKey = slidesRef.current.find((s) => s.photoIds.includes(photoId))?.key ?? slideKey
-        if (overTray) {
-          if (!fromTray) movePhotoToTray(photoId, ownerKey)
-        } else if (fromTray) {
-          if (toKey) movePhotoFromTray(photoId, toKey)
-        } else if (toKey && toKey !== ownerKey) {
-          movePhoto(photoId, ownerKey, toKey)
-        } else if (toKey === ownerKey) {
+        if (el?.closest?.('.playground')) {
+          relocatePhoto(photoId, TRAY_KEY)
+        } else if (toKey && (fromTray || toKey !== ownerKey)) {
+          relocatePhoto(photoId, toKey)
+        } else if (toKey === ownerKey && !fromTray) {
           // dropped within the same slide → swap with the photo under the pointer
           const canvasEl = card.querySelector('.slide-canvas')
           const idx = slidesRef.current.findIndex((s) => s.key === ownerKey)
@@ -745,7 +724,9 @@ export default function App() {
                 key={slide.key}
                 className={`slide-card glass-thin ${drag?.overKey === slide.key && drag.fromKey !== slide.key ? 'drop-target' : ''} ${
                   layouts[i]?.bridges?.some((b) => b.rect.x === 0) ? 'mesh-join-left' : ''
-                } ${layouts[i]?.bridges?.some((b) => b.rect.x > 0) ? 'mesh-join-right' : ''}`}
+                } ${layouts[i]?.bridges?.some((b) => b.rect.x > 0) ? 'mesh-join-right' : ''} ${
+                  hoverSeam === i || hoverSeam === i - 1 ? 'mesh-preview' : ''
+                }`}
                 data-slide-key={slide.key}
                 onMouseMove={(e) => {
                   if (drag || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
@@ -803,32 +784,22 @@ export default function App() {
                     </button>
                   </span>
                   <span className="slide-actions">
-                    <button
-                      className="icon-btn"
-                      onClick={() => shuffleSlide(i)}
-                      disabled={slide.photoIds.length === 0}
-                      aria-label="Shuffle this slide"
-                      title="Shuffle this slide"
-                    >
-                      <ShuffleIcon size={16} weight="duotone" />
-                    </button>
-                    <button
-                      className="icon-btn"
-                      onClick={() => downloadOne(i)}
-                      disabled={slide.photoIds.length === 0}
-                      aria-label="Download this slide"
-                      title="Download this slide"
-                    >
-                      <DownloadSimpleIcon size={16} weight="duotone" />
-                    </button>
-                    <button
-                      className="icon-btn icon-btn-danger"
-                      onClick={() => deleteSlide(i)}
-                      aria-label="Delete this slide"
-                      title="Delete this slide (removes its photos)"
-                    >
-                      <TrashIcon size={16} weight="duotone" />
-                    </button>
+                    {[
+                      { Icon: ShuffleIcon, label: 'Shuffle this slide', fn: () => shuffleSlide(i), needsPhotos: true },
+                      { Icon: DownloadSimpleIcon, label: 'Download this slide', fn: () => downloadOne(i), needsPhotos: true },
+                      { Icon: TrashIcon, label: 'Delete this slide', fn: () => deleteSlide(i), danger: true },
+                    ].map(({ Icon, label, fn, needsPhotos, danger }) => (
+                      <button
+                        key={label}
+                        className={`icon-btn ${danger ? 'icon-btn-danger' : ''}`}
+                        onClick={fn}
+                        disabled={needsPhotos && slide.photoIds.length === 0}
+                        aria-label={label}
+                        title={label}
+                      >
+                        <Icon size={16} weight="duotone" />
+                      </button>
+                    ))}
                   </span>
                 </div>
                 {slide.photoIds.length === 0 ? (
@@ -850,25 +821,32 @@ export default function App() {
                     onPhotoPointerDown={(e, photoId) => startPhotoDrag(e, slide.key, photoId)}
                   />
                 )}
-                {i < slides.length - 1 && slide.photoIds.length > 0 && slides[i + 1].photoIds.length > 0 && (
-                  <button
-                    className={`mesh-link glass-thick ${meshSeams.has(seamKey(i)) ? 'mesh-link-on' : 'mesh-link-off'}`}
-                    onClick={() => toggleSeam(i)}
-                    aria-pressed={meshSeams.has(seamKey(i))}
-                    aria-label={meshSeams.has(seamKey(i)) ? 'Unmesh these slides' : 'Mesh these slides'}
-                    title={
-                      meshSeams.has(seamKey(i))
-                        ? 'Meshed — a photo continues across both slides. Tap to separate.'
-                        : 'Tap to mesh these slides — a photo will flow across the seam.'
-                    }
-                  >
-                    {meshSeams.has(seamKey(i)) ? (
-                      <LinkSimpleIcon size={14} weight="bold" />
-                    ) : (
-                      <LinkBreakIcon size={14} weight="bold" />
-                    )}
-                  </button>
-                )}
+                {i < slides.length - 1 &&
+                  slide.photoIds.length > 0 &&
+                  slides[i + 1].photoIds.length > 0 &&
+                  (() => {
+                    const meshed = meshSeams.has(seamKey(i))
+                    const Icon = meshed ? LinkSimpleIcon : LinkBreakIcon
+                    return (
+                      <button
+                        className={`mesh-link glass-thick ${meshed ? 'mesh-link-on' : 'mesh-link-off'}`}
+                        onClick={() => toggleSeam(i)}
+                        onMouseEnter={() => setHoverSeam(i)}
+                        onMouseLeave={() => setHoverSeam(null)}
+                        onFocus={() => setHoverSeam(i)}
+                        onBlur={() => setHoverSeam(null)}
+                        aria-pressed={meshed}
+                        aria-label={meshed ? 'Unmesh these slides' : 'Mesh these slides'}
+                        title={
+                          meshed
+                            ? 'Meshed — a photo continues across both slides. Tap to separate.'
+                            : 'Tap to mesh these slides — a photo will flow across the seam.'
+                        }
+                      >
+                        <Icon size={17} weight="bold" />
+                      </button>
+                    )
+                  })()}
               </div>
             ))}
             {slides.length < MAX_SLIDES && !busyImporting && (
@@ -896,9 +874,7 @@ export default function App() {
               )}
             </div>
             {tray.length === 0 ? (
-              <p className="playground-hint">
-                Drag photos here to set them aside while you experiment — regroup and remix leave them be.
-              </p>
+              <p className="playground-hint">Drop photos here.</p>
             ) : (
               <div className="playground-shelf">
                 {tray.map((id) => (
@@ -935,30 +911,22 @@ export default function App() {
                 />
               </div>
             </div>
-            <label className="control">
-              <span className="control-label">
-                Gutter <b>{gutter}px</b>
-              </span>
-              <input type="range" min="0" max="24" value={gutter} onChange={(e) => setGutter(Number(e.target.value))} />
-            </label>
-            <label className="control">
-              <span className="control-label">
-                Tilt <b>{tilt}°</b>
-              </span>
-              <input type="range" min="0" max="6" value={tilt} onChange={(e) => setTilt(Number(e.target.value))} />
-            </label>
-            <label className="control">
-              <span className="control-label">
-                Corners <b>{cornerRadius}px</b>
-              </span>
-              <input
-                type="range"
-                min="0"
-                max="28"
-                value={cornerRadius}
-                onChange={(e) => setCornerRadius(Number(e.target.value))}
-              />
-            </label>
+            {[
+              ['Gutter', gutter, setGutter, 24, 'px'],
+              ['Tilt', tilt, setTilt, 6, '°'],
+              ['Corners', cornerRadius, setCornerRadius, 28, 'px'],
+            ].map(([label, value, set, max, unit]) => (
+              <label className="control" key={label}>
+                <span className="control-label">
+                  {label}{' '}
+                  <b>
+                    {value}
+                    {unit}
+                  </b>
+                </span>
+                <input type="range" min="0" max={max} value={value} onChange={(e) => set(Number(e.target.value))} />
+              </label>
+            ))}
             <div className="control">
               <span className="control-label">Background</span>
               <div className="swatches">
@@ -978,7 +946,7 @@ export default function App() {
               <span className="control-label">Aspect</span>
               <div className="segmented">
                 {['4:5', '1:1'].map((a) => (
-                  <button key={a} className={aspect === a ? 'active' : ''} onClick={() => handleAspect(a)}>
+                  <button key={a} className={aspect === a ? 'active' : ''} onClick={() => setAspect(a)}>
                     {a}
                   </button>
                 ))}
@@ -1088,7 +1056,7 @@ export default function App() {
               type="range"
               min="50"
               max="200"
-              step="5"
+              step="1"
               value={Math.round((sizeBoosts.get(sizeEdit.photoId) ?? 1) * 100)}
               aria-label="Photo size"
               onChange={(e) => {
@@ -1138,14 +1106,7 @@ function FilterBar({ photo, look, setLook }) {
   useEffect(() => cancelClose, [])
 
   // touch has no hover — a tap anywhere outside the open strip collapses it
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e) => {
-      if (!barRef.current?.contains(e.target)) setOpen(false)
-    }
-    document.addEventListener('pointerdown', onDown, true)
-    return () => document.removeEventListener('pointerdown', onDown, true)
-  }, [open])
+  useDismiss(open, (e) => barRef.current?.contains(e.target), () => setOpen(false))
 
   return (
     <div
@@ -1231,22 +1192,27 @@ function BubbleThumb({ photo, lookKey }) {
   return <canvas ref={ref} className="bubble-thumb" aria-hidden="true" />
 }
 
-// One parked photo on the playground shelf — sized by its own aspect,
-// draggable back onto any slide.
-function TrayThumb({ photo, onPointerDown }) {
+// Draw a photo's preview into a canvas at the size scaleFor picks (2× backed).
+function useBitmapCanvas(photo, scaleFor) {
   const ref = useRef(null)
   useEffect(() => {
     const canvas = ref.current
     const bmp = photo?.previewBitmap
     if (!canvas || !bmp?.width) return
-    const h = 76
-    const w = Math.max(28, Math.round((bmp.width / bmp.height) * h))
-    canvas.width = w * 2
-    canvas.height = h * 2
-    canvas.style.width = `${w}px`
-    canvas.style.height = `${h}px`
+    const [w, h] = scaleFor(bmp)
+    canvas.width = Math.max(1, Math.round(w * 2))
+    canvas.height = Math.max(1, Math.round(h * 2))
+    canvas.style.width = `${Math.round(w)}px`
+    canvas.style.height = `${Math.round(h)}px`
     canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height)
-  }, [photo])
+  }, [photo]) // eslint-disable-line react-hooks/exhaustive-deps
+  return ref
+}
+
+// One parked photo on the playground shelf — sized by its own aspect,
+// leaning at its own angle like a print on a light table.
+function TrayThumb({ photo, onPointerDown }) {
+  const ref = useBitmapCanvas(photo, (bmp) => [Math.max(28, (bmp.width / bmp.height) * 76), 76])
   // block scroll only while a drag is actually active, same as the slides
   useEffect(() => {
     const canvas = ref.current
@@ -1255,21 +1221,23 @@ function TrayThumb({ photo, onPointerDown }) {
     }
     canvas.addEventListener('touchmove', onTouchMove, { passive: false })
     return () => canvas.removeEventListener('touchmove', onTouchMove)
-  }, [])
-  return <canvas ref={ref} className="tray-thumb" onPointerDown={onPointerDown} />
+  }, [ref])
+  const lean = (tiltAngle(photo?.id ?? 0, 7) * 180) / Math.PI
+  return (
+    <canvas
+      ref={ref}
+      className="tray-thumb"
+      style={{ transform: `rotate(${lean.toFixed(1)}deg)` }}
+      onPointerDown={onPointerDown}
+    />
+  )
 }
 
 function DragGhost({ drag, photo }) {
-  const ref = useRef(null)
-  useEffect(() => {
-    const canvas = ref.current
-    if (!canvas || !photo?.previewBitmap) return
-    const bmp = photo.previewBitmap
+  const ref = useBitmapCanvas(photo, (bmp) => {
     const s = 72 / Math.max(bmp.width, bmp.height)
-    canvas.width = Math.max(1, Math.round(bmp.width * s))
-    canvas.height = Math.max(1, Math.round(bmp.height * s))
-    canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height)
-  }, [photo])
+    return [bmp.width * s, bmp.height * s]
+  })
   return (
     <div className="drag-ghost" style={{ left: drag.x, top: drag.y }}>
       <canvas ref={ref} />
