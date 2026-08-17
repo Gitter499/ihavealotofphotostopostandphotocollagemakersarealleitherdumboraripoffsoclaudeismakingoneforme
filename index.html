@@ -8,10 +8,17 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
     <title>Photogram</title>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      // installable + offline; registered during load so the app still makes
+      // zero network requests once it's up
+      if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {})
+    </script>
   </body>
 </html>
