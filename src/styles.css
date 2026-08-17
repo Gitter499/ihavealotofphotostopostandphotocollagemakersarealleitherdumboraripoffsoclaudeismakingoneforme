@@ -948,7 +948,8 @@ input[type='range']::-moz-range-thumb {
   .options-popover,
   .size-popover,
   .tpl-popover,
-  .cap-popover {
+  .cap-popover,
+  .text-popover {
     animation: popover-in 320ms var(--ease-spring);
   }
 }
@@ -1336,10 +1337,11 @@ body[data-dragging='1'] .mesh-link {
   }
 }
 
-/* ---------- template picker + caption editor ---------- */
+/* ---------- template picker + caption + text box editors ---------- */
 
 .tpl-popover,
-.cap-popover {
+.cap-popover,
+.text-popover {
   position: fixed;
   z-index: 80;
   display: flex;
@@ -1352,8 +1354,25 @@ body[data-dragging='1'] .mesh-link {
   overflow-y: auto;
 }
 
-.cap-popover {
+.cap-popover,
+.text-popover {
   width: 280px;
+}
+
+.text-popover textarea.cap-input {
+  resize: none;
+  line-height: 1.35;
+}
+
+.mini-label {
+  font-size: var(--text-caption1);
+  color: var(--label-tertiary);
+  min-width: 38px;
+}
+
+.text-popover input[type='range'] {
+  flex: 1;
+  min-width: 0;
 }
 
 .tpl-grid {
@@ -1641,7 +1660,8 @@ input.swatch-pick.active {
 @media (max-width: 640px) {
   .size-popover,
   .tpl-popover,
-  .cap-popover {
+  .cap-popover,
+  .text-popover {
     left: 0;
     right: 0;
     top: auto;
@@ -1675,6 +1695,7 @@ input.swatch-pick.active {
   .size-popover,
   .tpl-popover,
   .cap-popover,
+  .text-popover,
   .options-popover {
     animation: sheet-up 340ms var(--ease-spring);
   }

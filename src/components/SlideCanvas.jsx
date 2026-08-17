@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { drawSlide, makeStagger, easeOut, lerpRect } from '../lib/render.js'
+import { drawSlide, makeStagger, easeOut, lerpRect, textBoxRect } from '../lib/render.js'
 
 const BACKING_W = 640
 const MORPH_MS = 420
@@ -26,8 +26,10 @@ export default function SlideCanvas({
   radius,
   border,
   caption,
+  texts,
   animKey,
   onPhotoPointerDown,
+  onTextPointerDown,
 }) {
   const ref = useRef(null)
   const lastAnimKey = useRef(null)
@@ -67,6 +69,7 @@ export default function SlideCanvas({
         focals,
         border,
         caption,
+        texts,
       })
       // remember what is actually on screen so an interrupted morph
       // continues from where it is instead of jumping
@@ -115,13 +118,24 @@ export default function SlideCanvas({
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [slide, layout, photos, canvasW, canvasH, bg, imagesOverride, tilt, radius, border, caption, animKey])
+  }, [slide, layout, photos, canvasW, canvasH, bg, imagesOverride, tilt, radius, border, caption, texts, animKey])
 
   const handlePointerDown = (e) => {
-    if (!onPhotoPointerDown) return
     const box = ref.current.getBoundingClientRect()
     const x = ((e.clientX - box.left) / box.width) * canvasW
     const y = ((e.clientY - box.top) / box.height) * canvasH
+    // text boxes draw on top of everything, so they claim the tap first
+    if (onTextPointerDown && texts?.length) {
+      const ctx = ref.current.getContext('2d')
+      for (let i = texts.length - 1; i >= 0; i--) {
+        const r = textBoxRect(ctx, canvasW, canvasH, texts[i])
+        if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+          onTextPointerDown(e, texts[i].id, box)
+          return
+        }
+      }
+    }
+    if (!onPhotoPointerDown) return
     // reverse order: overlapping cells draw last-on-top
     for (let i = rects.length - 1; i >= 0; i--) {
       const r = rects[i]

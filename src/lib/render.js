@@ -145,6 +145,71 @@ function strokeBorder(ctx, x, y, w, h, radius, border) {
   ctx.restore()
 }
 
+const TEXT_FONT = (size) => `700 ${size}px 'Bricolage Grotesque', -apple-system, 'Helvetica Neue', sans-serif`
+
+// A free text box: centred at (x, y) in 0..1 canvas fractions, size relative
+// to canvas width, any colour, and an optional curve that bends the baseline
+// into an arc (positive arches up, negative bowls down). Multi-line via \n.
+function drawTextBox(ctx, width, height, t) {
+  const text = (t.text ?? '').trimEnd()
+  if (!text.trim()) return
+  const size = Math.max(8, Math.round(width * (t.size ?? 0.07)))
+  const lines = text.split('\n')
+  const lineH = size * 1.15
+  ctx.save()
+  ctx.font = TEXT_FONT(size)
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillStyle = t.color || '#ffffff'
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.55)'
+  ctx.shadowBlur = size * 0.18
+  ctx.shadowOffsetY = 2
+  const cx = t.x * width
+  const y0 = t.y * height - ((lines.length - 1) * lineH) / 2
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const py = y0 + i * lineH
+    const bend = t.curve ?? 0
+    if (Math.abs(bend) < 0.04 || !line.trim()) {
+      ctx.fillText(line, cx, py)
+      continue
+    }
+    // chars walk an arc: radius from the text length and the bend's span
+    const chars = [...line]
+    const widths = chars.map((c) => ctx.measureText(c).width)
+    const total = widths.reduce((a, b) => a + b, 0) || 1
+    const span = bend * 2.4
+    const R = total / Math.abs(span)
+    const dir = span > 0 ? 1 : -1
+    ctx.save()
+    ctx.translate(cx, py + dir * R)
+    let ang = -Math.abs(span) / 2
+    for (let j = 0; j < chars.length; j++) {
+      ang += widths[j] / (2 * R)
+      ctx.save()
+      ctx.rotate(dir * ang)
+      ctx.fillText(chars[j], 0, -dir * R)
+      ctx.restore()
+      ang += widths[j] / (2 * R)
+    }
+    ctx.restore()
+  }
+  ctx.restore()
+}
+
+// Generous bounding box for hit-testing a text box, in canvas units.
+export function textBoxRect(ctx, width, height, t) {
+  const size = Math.max(8, Math.round(width * (t.size ?? 0.07)))
+  const lines = (t.text ?? '').split('\n')
+  ctx.save()
+  ctx.font = TEXT_FONT(size)
+  const w = Math.max(size, ...lines.map((l) => ctx.measureText(l).width))
+  ctx.restore()
+  const h = lines.length * size * 1.15 + Math.abs(t.curve ?? 0) * w * 0.3
+  const pad = size * 0.25
+  return { x: t.x * width - w / 2 - pad, y: t.y * height - h / 2 - pad, w: w + 2 * pad, h: h + 2 * pad }
+}
+
 // Slide caption: display type over a soft scrim so it reads on any photo.
 // Wraps to at most two lines; pos is 'top' or 'bottom'.
 function drawCaption(ctx, width, height, caption) {
@@ -206,6 +271,7 @@ export function drawSlide(
     focals = null,
     border = null,
     caption = null,
+    texts = [],
   },
 ) {
   ctx.fillStyle = bg
@@ -227,6 +293,7 @@ export function drawSlide(
     })
   }
   if (caption) drawCaption(ctx, width, height, caption)
+  for (const t of texts) drawTextBox(ctx, width, height, t)
 }
 
 // Per-photo animation timing: staggered settle, total run ≤ ~800ms.

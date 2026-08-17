@@ -56,6 +56,8 @@ const BG_SWATCHES = [
 ]
 
 let slideKeyCounter = 1
+let textKeyCounter = 1
+const EMPTY_TEXTS = [] // stable ref so canvases without text don't re-render
 
 // Phone-width detection: below this, floating popovers become bottom sheets
 // in the thumb zone and per-slide actions collapse behind one ⋯ button.
@@ -103,6 +105,8 @@ export default function App() {
   const [tplEdit, setTplEdit] = useState(null) // {slideKey, count, x, y} — template picker
   const [captions, setCaptions] = useState(() => new Map()) // slideKey → {text, pos}
   const [capEdit, setCapEdit] = useState(null) // {slideKey, x, y} — caption editor
+  const [textBoxes, setTextBoxes] = useState(() => new Map()) // slideKey → [{id, text, x, y, size, color, curve}]
+  const [textEdit, setTextEdit] = useState(null) // {slideKey, textId, x, y} — text box editor
   const [moreEdit, setMoreEdit] = useState(null) // {slideKey} — mobile ⋯ action sheet
   const [showHints, setShowHints] = useState(false) // first-run coach marks
   const [borderW, setBorderW] = useState(0) // px stroke around every photo
@@ -245,6 +249,13 @@ export default function App() {
       setSizeBoosts(new Map(workspace.sizeBoosts ?? []))
       setSlideTemplates(new Map(workspace.slideTemplates ?? []))
       setCaptions(new Map(workspace.captions ?? []))
+      const restoredTexts = new Map(workspace.textBoxes ?? [])
+      for (const list of restoredTexts.values())
+        for (const t of list) {
+          const m = /^t(\d+)$/.exec(t.id)
+          if (m) textKeyCounter = Math.max(textKeyCounter, Number(m[1]) + 1)
+        }
+      setTextBoxes(restoredTexts)
       setImportState(null)
       setRestoring(false)
     })()
@@ -279,11 +290,12 @@ export default function App() {
         sizeBoosts: [...sizeBoosts],
         slideTemplates: [...slideTemplates],
         captions: [...captions],
+        textBoxes: [...textBoxes],
         savedAt: Date.now(),
       })
     }, 800)
     return () => clearTimeout(t)
-  }, [restoring, photos, slides, tray, perSlide, gutter, bgMode, look, tilt, cornerRadius, aspect, customAspect, borderW, borderColor, borderStyle, lookStrength, exportFormat, exportSize, meshSeams, sizeBoosts, slideTemplates, captions])
+  }, [restoring, photos, slides, tray, perSlide, gutter, bgMode, look, tilt, cornerRadius, aspect, customAspect, borderW, borderColor, borderStyle, lookStrength, exportFormat, exportSize, meshSeams, sizeBoosts, slideTemplates, captions, textBoxes])
 
   // Per-photo pan: nudge the crop's focal point inside its cell. The photo
   // object carries the new focal (so previews, exports, and the stored
@@ -420,6 +432,9 @@ export default function App() {
     if (cap) setCaptions((prev) => new Map(prev).set(copy.key, { ...cap }))
     const tpl = slideTemplates.get(orig.key)
     if (tpl) setSlideTemplates((prev) => new Map(prev).set(copy.key, tpl))
+    const texts = textBoxes.get(orig.key)
+    if (texts?.length)
+      setTextBoxes((prev) => new Map(prev).set(copy.key, texts.map((t) => ({ ...t, id: `t${textKeyCounter++}` }))))
   }
 
   // Start over: wipe the stored session and the workspace together.
@@ -435,6 +450,7 @@ export default function App() {
     setSizeBoosts(new Map())
     setSlideTemplates(new Map())
     setCaptions(new Map())
+    setTextBoxes(new Map())
     setNotice(null)
     setSkipped([])
     setOptionsOpen(false)
@@ -452,6 +468,7 @@ export default function App() {
         setTplEdit(null)
         setCapEdit(null)
         setMoreEdit(null)
+        setTextEdit(null)
         return
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
@@ -483,6 +500,7 @@ export default function App() {
   useDismiss(!!sizeEdit, (e) => e.target.closest?.('.size-popover'), () => setSizeEdit(null))
   useDismiss(!!tplEdit, (e) => e.target.closest?.('.tpl-popover'), () => setTplEdit(null))
   useDismiss(!!capEdit, (e) => e.target.closest?.('.cap-popover'), () => setCapEdit(null))
+  useDismiss(!!textEdit, (e) => e.target.closest?.('.text-popover'), () => setTextEdit(null))
   useDismiss(!!moreEdit, (e) => e.target.closest?.('.action-sheet'), () => setMoreEdit(null))
   const isMobile = useIsMobile()
 
@@ -800,6 +818,80 @@ export default function App() {
     })
   }
 
+  // ---- free text boxes ----
+  const addTextBox = (slideKey) => {
+    pushHistory()
+    haptics.select()
+    const id = `t${textKeyCounter++}`
+    setTextBoxes((prev) => {
+      const next = new Map(prev)
+      next.set(slideKey, [
+        ...(next.get(slideKey) ?? []),
+        { id, text: 'Your words', x: 0.5, y: 0.42, size: 0.07, color: '#ffffff', curve: 0 },
+      ])
+      return next
+    })
+    return id
+  }
+
+  const updateTextBox = (slideKey, textId, patch, tag = '') => {
+    pushHistory(tag)
+    setTextBoxes((prev) => {
+      const next = new Map(prev)
+      next.set(
+        slideKey,
+        (next.get(slideKey) ?? []).map((t) => (t.id === textId ? { ...t, ...patch } : t)),
+      )
+      return next
+    })
+  }
+
+  const deleteTextBox = (slideKey, textId) => {
+    pushHistory()
+    haptics.tap()
+    setTextBoxes((prev) => {
+      const next = new Map(prev)
+      const rest = (next.get(slideKey) ?? []).filter((t) => t.id !== textId)
+      if (rest.length) next.set(slideKey, rest)
+      else next.delete(slideKey)
+      return next
+    })
+    setTextEdit(null)
+  }
+
+  // Drag moves the box; a clean tap opens its editor. `box` is the canvas
+  // rect captured at pointerdown so coords stay stable through the drag.
+  const startTextDrag = (e, slideKey, textId, box) => {
+    if (exportState) return
+    const start = { x: e.clientX, y: e.clientY }
+    let moved = false
+    const onMove = (ev) => {
+      if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 6) return
+      if (!moved) {
+        moved = true
+        document.body.dataset.dragging = '1'
+        haptics.pickup()
+        setTextEdit(null)
+      }
+      const x = Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width))
+      const y = Math.min(1, Math.max(0, (ev.clientY - box.top) / box.height))
+      updateTextBox(slideKey, textId, { x, y }, `tmove:${textId}`)
+    }
+    const onUp = (ev) => {
+      cleanup()
+      if (!moved) setTextEdit({ slideKey, textId, x: ev.clientX, y: ev.clientY })
+    }
+    const cleanup = () => {
+      delete document.body.dataset.dragging
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', cleanup)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', cleanup)
+  }
+
   // in a merged group, dropping a photo onto a cell owned by another member
   // slide trades the two photos' slots across the slides
   const swapAcrossSlides = (idA, idB) => {
@@ -858,7 +950,7 @@ export default function App() {
   // objects are treated as immutable (edits like nudges replace them), so a
   // snapshot is a handful of container copies, not a deep clone.
   const stateRef = useRef(null)
-  stateRef.current = { photos, slides, tray, meshSeams, sizeBoosts, slideTemplates, captions }
+  stateRef.current = { photos, slides, tray, meshSeams, sizeBoosts, slideTemplates, captions, textBoxes }
   const history = useRef({ past: [], future: [], lastTag: '', lastAt: 0 })
   const [historyTick, setHistoryTick] = useState(0)
 
@@ -870,6 +962,7 @@ export default function App() {
     sizeBoosts: new Map(stateRef.current.sizeBoosts),
     slideTemplates: new Map(stateRef.current.slideTemplates),
     captions: new Map(stateRef.current.captions),
+    textBoxes: new Map(stateRef.current.textBoxes),
   })
 
   // call BEFORE mutating; same-tag pushes within a second coalesce, so a
@@ -906,6 +999,7 @@ export default function App() {
     setSizeBoosts(s.sizeBoosts)
     setSlideTemplates(s.slideTemplates)
     setCaptions(s.captions)
+    setTextBoxes(s.textBoxes)
   }
 
   const undo = () => {
@@ -1129,6 +1223,7 @@ export default function App() {
           radius: cornerRadius,
           border: borderW > 0 ? { width: borderW, color: borderColor, style: borderStyle } : null,
           captions,
+          textsBySlide: textBoxes,
           format: exportFormat,
         },
         (done, total) => setExportState({ done, total }),
@@ -1152,6 +1247,7 @@ export default function App() {
       radius: cornerRadius,
       border: borderW > 0 ? { width: borderW, color: borderColor, style: borderStyle } : null,
       caption: captions.get(slides[i].key) ?? null,
+      texts: textBoxes.get(slides[i].key) ?? [],
       format: exportFormat,
     })
     saveBlob(blob, slideFileName(i, exportFormat))
@@ -1445,6 +1541,8 @@ export default function App() {
                     radius={cornerRadius}
                     border={borderW > 0 ? { width: borderW, color: borderColor, style: borderStyle } : null}
                     caption={captions.get(slide.key) ?? null}
+                    texts={textBoxes.get(slide.key) ?? EMPTY_TEXTS}
+                    onTextPointerDown={(e, textId, box) => startTextDrag(e, slide.key, textId, box)}
                     animKey={`${slide.key}:${aspect}:${gutter}:${(layouts[i]?.drawIds ?? []).join('.')}:${(layouts[i]?.drawRects ?? [])
                       .map((r) => (r ? `${r.x | 0},${r.y | 0},${r.w | 0}` : ''))
                       .join(';')}`}
@@ -1953,8 +2051,91 @@ export default function App() {
               </button>
             ))}
           </div>
+          <button
+            className="chip"
+            title="Drop a movable text box on the slide — drag it anywhere, tap it to style"
+            onClick={() => {
+              const slideKey = capEdit.slideKey
+              const id = addTextBox(slideKey)
+              setCapEdit(null)
+              setTextEdit({ slideKey, textId: id, x: capEdit.x, y: capEdit.y })
+            }}
+          >
+            + Text box
+          </button>
         </div>
       )}
+
+      {textEdit &&
+        (() => {
+          const t = (textBoxes.get(textEdit.slideKey) ?? []).find((b) => b.id === textEdit.textId)
+          if (!t) return null
+          return (
+            <div
+              className="text-popover glass-thick"
+              role="dialog"
+              aria-label="Text box"
+              style={
+                isMobile
+                  ? undefined
+                  : {
+                      left: Math.max(8, Math.min(textEdit.x - 150, window.innerWidth - 320)),
+                      top: Math.max(8, Math.min(textEdit.y + 14, window.innerHeight - 250)),
+                    }
+              }
+            >
+              <span className="control-label">Text box</span>
+              <textarea
+                className="cap-input"
+                rows={2}
+                maxLength={120}
+                placeholder="Say something…"
+                value={t.text}
+                autoFocus
+                onChange={(e) => updateTextBox(textEdit.slideKey, textEdit.textId, { text: e.target.value }, `ttext:${t.id}`)}
+              />
+              <div className="size-popover-row">
+                <span className="mini-label">Size</span>
+                <input
+                  type="range"
+                  min="3"
+                  max="18"
+                  value={Math.round((t.size ?? 0.07) * 100)}
+                  aria-label="Text size"
+                  onChange={(e) => updateTextBox(textEdit.slideKey, textEdit.textId, { size: Number(e.target.value) / 100 }, `tsize:${t.id}`)}
+                />
+              </div>
+              <div className="size-popover-row">
+                <span className="mini-label">Curve</span>
+                <input
+                  type="range"
+                  min="-100"
+                  max="100"
+                  value={Math.round((t.curve ?? 0) * 100)}
+                  aria-label="Text curve"
+                  onChange={(e) => {
+                    const v = Number(e.target.value) / 100
+                    if ((t.curve ?? 0) !== 0 && (t.curve ?? 0) * v <= 0) haptics.detent()
+                    updateTextBox(textEdit.slideKey, textEdit.textId, { curve: v }, `tcurve:${t.id}`)
+                  }}
+                />
+              </div>
+              <div className="size-popover-row">
+                <input
+                  type="color"
+                  className="swatch swatch-pick"
+                  value={t.color ?? '#ffffff'}
+                  aria-label="Text colour"
+                  onChange={(e) => updateTextBox(textEdit.slideKey, textEdit.textId, { color: e.target.value }, `tcolor:${t.id}`)}
+                />
+                <span className="nudge-hint">drag the text on the slide to place it</span>
+                <button className="chip chip-danger" onClick={() => deleteTextBox(textEdit.slideKey, textEdit.textId)}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          )
+        })()}
 
       {sizeEdit && (
         <div
