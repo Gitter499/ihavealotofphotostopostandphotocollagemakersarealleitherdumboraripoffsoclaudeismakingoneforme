@@ -1446,6 +1446,26 @@ body[data-dragging='1'] .mesh-link {
   min-width: 0;
 }
 
+.nudge-row {
+  gap: var(--space-1);
+}
+
+.nudge-row .icon-btn {
+  border: 1px solid var(--glass-border);
+  width: 36px;
+  height: 32px;
+  border-radius: var(--radius-md);
+}
+
+.nudge-hint {
+  margin-left: auto;
+  color: var(--label-tertiary);
+  font-size: var(--text-caption1);
+  max-width: 84px;
+  line-height: 1.25;
+  text-align: right;
+}
+
 /* ---------- drag ghost ---------- */
 
 .drag-ghost {

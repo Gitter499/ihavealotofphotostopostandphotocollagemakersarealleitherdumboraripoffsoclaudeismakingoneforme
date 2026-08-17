@@ -35,6 +35,10 @@ import {
   SquaresFourIcon,
   TextTIcon,
   DotsThreeIcon,
+  CaretUpIcon,
+  CaretDownIcon,
+  CaretLeftIcon,
+  CaretRightIcon,
 } from '@phosphor-icons/react'
 
 const BG_SWATCHES = [
@@ -243,6 +247,39 @@ export default function App() {
     }, 800)
     return () => clearTimeout(t)
   }, [restoring, photos, slides, tray, perSlide, gutter, bgMode, look, tilt, cornerRadius, aspect, borderW, borderColor, meshSeams, sizeBoosts, slideTemplates, captions])
+
+  // Per-photo pan: nudge the crop's focal point inside its cell. The photo
+  // object carries the new focal (so previews, exports, and the stored
+  // session all follow), keeping the saliency answer aside for Reset.
+  const nudgeFocal = (photoId, dx, dy) => {
+    const p = photos.get(photoId)
+    if (!p) return
+    haptics.tap()
+    const base = p.focal ?? { x: 0.5, y: 0.5 }
+    const upd = {
+      ...p,
+      focalAuto: p.focalAuto ?? p.focal ?? null,
+      focal: {
+        x: Math.min(1, Math.max(0, base.x + dx)),
+        y: Math.min(1, Math.max(0, base.y + dy)),
+      },
+    }
+    setPhotos((prev) => new Map(prev).set(photoId, upd))
+    savePhotos([upd])
+  }
+
+  const resetPhotoEdits = (photoId) => {
+    const p = photos.get(photoId)
+    if (!p) return
+    const upd = { ...p, focal: p.focalAuto ?? p.focal }
+    setPhotos((prev) => new Map(prev).set(photoId, upd))
+    savePhotos([upd])
+    setSizeBoosts((prev) => {
+      const next = new Map(prev)
+      next.delete(photoId)
+      return next
+    })
+  }
 
   // Start over: wipe the stored session and the workspace together.
   const startOver = () => {
@@ -1491,19 +1528,29 @@ export default function App() {
                 })
               }}
             />
-            <button
-              className="chip"
-              disabled={!sizeBoosts.has(sizeEdit.photoId)}
-              onClick={() =>
-                setSizeBoosts((prev) => {
-                  const next = new Map(prev)
-                  next.delete(sizeEdit.photoId)
-                  return next
-                })
-              }
-            >
+            <button className="chip" onClick={() => resetPhotoEdits(sizeEdit.photoId)}>
               Reset
             </button>
+          </div>
+          <span className="control-label">Position</span>
+          <div className="size-popover-row nudge-row">
+            {[
+              { Icon: CaretLeftIcon, label: 'Nudge left', dx: -0.1, dy: 0 },
+              { Icon: CaretUpIcon, label: 'Nudge up', dx: 0, dy: -0.1 },
+              { Icon: CaretDownIcon, label: 'Nudge down', dx: 0, dy: 0.1 },
+              { Icon: CaretRightIcon, label: 'Nudge right', dx: 0.1, dy: 0 },
+            ].map(({ Icon, label, dx, dy }) => (
+              <button
+                key={label}
+                className="icon-btn"
+                aria-label={label}
+                title={label}
+                onClick={() => nudgeFocal(sizeEdit.photoId, dx, dy)}
+              >
+                <Icon size={16} weight="bold" />
+              </button>
+            ))}
+            <span className="nudge-hint">slides the crop inside its slot</span>
           </div>
         </div>
       )}

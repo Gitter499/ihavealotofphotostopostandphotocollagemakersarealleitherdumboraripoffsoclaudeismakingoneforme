@@ -604,10 +604,25 @@ try {
   assert.notEqual(postResize, preResize, 'size slider did not change the layout')
   await page.locator('.size-popover').getByRole('button', { name: 'Reset' }).click()
   await page.waitForTimeout(600)
+  // pan: nudging slides the crop inside its slot (two axes — at least one
+  // has slack unless the aspect matches the cell exactly)
+  const preNudge = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  await page.locator('[aria-label="Nudge left"]').click()
+  await page.locator('[aria-label="Nudge left"]').click()
+  await page.locator('[aria-label="Nudge up"]').click()
+  await page.locator('[aria-label="Nudge up"]').click()
+  await page.waitForTimeout(500)
+  assert.notEqual(
+    await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL()),
+    preNudge,
+    'nudging did not move the crop',
+  )
+  await page.locator('.size-popover').getByRole('button', { name: 'Reset' }).click()
+  await page.waitForTimeout(400)
   await page.keyboard.press('Escape')
   await page.waitForTimeout(200)
   assert.equal(await page.locator('.size-popover').count(), 0, 'Escape should close the size popover')
-  console.log('  ok  tapping a photo opens a size slider; the slot resizes live')
+  console.log('  ok  tap opens the photo editor: size slider resizes, nudges pan the crop')
 
   // layout templates: pin a classic and the slide snaps to it; Auto unpins
   await page.locator('.slide-canvas').first().scrollIntoViewIfNeeded()
