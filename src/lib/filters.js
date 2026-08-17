@@ -16,6 +16,11 @@ export const LOOKS = [
   { key: 'frost', label: 'Frost' },
   { key: 'fade', label: 'Fade' },
   { key: 'noir', label: 'Noir' },
+  { key: 'cinema', label: 'Cinema' },
+  { key: 'air', label: 'Air' },
+  { key: 'lomo', label: 'Lomo' },
+  { key: 'amber', label: 'Amber' },
+  { key: 'slate', label: 'Slate' },
 ]
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
@@ -90,11 +95,30 @@ export function matrixFor(photo, look) {
     frost: [brightness(b * 1.03), contrast(c), saturate(0.92), hueRotate(12)],
     fade: [brightness(b * 1.05), contrast(0.86), saturate(0.85)],
     noir: [grayscale(1), brightness(b), contrast(Math.max(c, 1.14))],
+    // teal shadows, orange skin — the blockbuster grade
+    cinema: [brightness(b), contrast(c * 1.05), saturate(1.12), hueRotate(-6), sepia(0.1)],
+    // high-key: lifted, soft, airy
+    air: [brightness(b * 1.1), contrast(0.9), saturate(0.95)],
+    // cross-process: punchy contrast, green-shifted mids
+    lomo: [brightness(b * 0.98), contrast(1.22), saturate(1.3), hueRotate(8)],
+    // warm vintage, deeper than Film
+    amber: [brightness(b * 1.02), contrast(c), sepia(0.42), saturate(1.18)],
+    // cool matte: desaturated blue-grey mood
+    slate: [brightness(b), contrast(0.94), saturate(0.72), hueRotate(18)],
   }[look]
   if (!steps) return null
   let m = IDENTITY
   for (const step of steps) m = compose(m, step)
   return m
+}
+
+// Dial a look's strength: 1 = the full grade, 0 = untouched. Linear blend of
+// the composed matrix toward identity — exactly what an opacity crossfade of
+// the filtered image would produce, without a second buffer.
+export function withStrength(m, t) {
+  if (!m || t >= 1) return m
+  if (t <= 0) return null
+  return m.map((v, i) => IDENTITY[i] * (1 - t) + v * t)
 }
 
 // In-place on a Uint8ClampedArray of RGBA pixels.

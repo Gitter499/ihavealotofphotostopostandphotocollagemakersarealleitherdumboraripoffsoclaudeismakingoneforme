@@ -12,6 +12,11 @@ export function bumpIdCounter(min) {
   if (min >= nextId) nextId = min + 1
 }
 
+// duplicated slides mint fresh ids for their photo clones
+export function claimId() {
+  return nextId++
+}
+
 function makeWorker() {
   return new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
 }

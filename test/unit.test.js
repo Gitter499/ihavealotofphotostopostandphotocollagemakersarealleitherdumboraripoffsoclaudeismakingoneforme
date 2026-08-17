@@ -11,7 +11,7 @@ import {
   harmonizeColors,
   adjustGroupSize,
 } from '../src/lib/grouping.js'
-import { matrixFor, applyMatrix } from '../src/lib/filters.js'
+import { matrixFor, applyMatrix, withStrength, LOOKS } from '../src/lib/filters.js'
 import { tiltAngle } from '../src/lib/render.js'
 import { computeLayout, cropLoss, MAX_CROP_LOSS } from '../src/lib/layout.js'
 import { mulberry32 } from '../src/lib/rng.js'
@@ -528,6 +528,23 @@ test('a size weight pulls a photo toward a matching share of the canvas', () => 
   // weights: null must reproduce the unweighted layout exactly
   const nullWeights = computeLayout(aspects, { ...base, weights: null })
   assert.deepEqual(nullWeights.rects, even.rects)
+})
+
+// ---------- filter strength + look catalogue ----------
+
+test('withStrength blends toward identity and every look yields a distinct matrix', () => {
+  const photo = { luma: 0.5, contrast: 0.5 }
+  const m = matrixFor(photo, 'noir')
+  assert.equal(withStrength(m, 1), m, 'full strength is the matrix itself')
+  assert.equal(withStrength(m, 0), null, 'zero strength is no filter at all')
+  const half = withStrength(m, 0.5)
+  // halfway between identity and the grade, elementwise
+  assert.ok(Math.abs(half[0] - (1 + m[0]) / 2) < 1e-9)
+  assert.ok(Math.abs(half[1] - m[1] / 2) < 1e-9)
+  // the catalogue: 12 looks, every graded matrix distinct
+  assert.equal(LOOKS.length, 12)
+  const mats = LOOKS.filter((l) => l.key !== 'off').map((l) => JSON.stringify(matrixFor(photo, l.key)))
+  assert.equal(new Set(mats).size, mats.length, 'two looks produce identical grades')
 })
 
 // ---------- template engine ----------

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { importFiles, bumpIdCounter } from './lib/importer.js'
+import { importFiles, bumpIdCounter, claimId } from './lib/importer.js'
 import { savePhotos, deletePhotos, saveWorkspace, loadSession, clearSession } from './lib/store.js'
 import {
   sortPhotos,
@@ -11,7 +11,7 @@ import {
 } from './lib/grouping.js'
 import { computeLayout } from './lib/layout.js'
 import { averageColor, ambientFrom } from './lib/colors.js'
-import { LOOKS, matrixFor, applyMatrix, filteredBitmap } from './lib/filters.js'
+import { LOOKS, matrixFor, applyMatrix, filteredBitmap, withStrength } from './lib/filters.js'
 import { fireConfetti } from './lib/confetti.js'
 import { exportAllAsZip, renderSlideBlob, slideFileName, saveBlob } from './lib/exportZip.js'
 import { remixPlan } from './lib/remix.js'
@@ -42,6 +42,9 @@ import {
   HandTapIcon,
   ArrowsOutCardinalIcon,
   SparkleIcon,
+  CopyIcon,
+  ArrowUUpLeftIcon,
+  ArrowUUpRightIcon,
 } from '@phosphor-icons/react'
 
 const BG_SWATCHES = [
@@ -102,6 +105,10 @@ export default function App() {
   const [showHints, setShowHints] = useState(false) // first-run coach marks
   const [borderW, setBorderW] = useState(0) // px stroke around every photo
   const [borderColor, setBorderColor] = useState('#ffffff')
+  const [borderStyle, setBorderStyle] = useState('solid') // solid | double | dashed
+  const [lookStrength, setLookStrength] = useState(1) // 0..1 dial on the active look
+  const [exportFormat, setExportFormat] = useState('jpeg') // jpeg | png
+  const [customAspect, setCustomAspect] = useState({ w: 4, h: 5 })
   const [aspect, setAspect] = useState('4:5')
   const [importState, setImportState] = useState(null) // {done, total}
   const [skipped, setSkipped] = useState([])
@@ -117,7 +124,14 @@ export default function App() {
   trayRef.current = tray
 
   const canvasW = 1080
-  const canvasH = aspect === '1:1' ? 1080 : aspect === '9:16' ? 1920 : 1350
+  const canvasH =
+    aspect === '1:1'
+      ? 1080
+      : aspect === '9:16'
+        ? 1920
+        : aspect === 'custom'
+          ? Math.round(Math.min(1920, Math.max(540, (1080 * (customAspect.h || 1)) / (customAspect.w || 1))))
+          : 1350
   const margin = gutter * 2 // gutter 8 → margin 16 (spec defaults); gutter 0 → full bleed
 
   const recompose = useCallback((photosMap, per) => {
@@ -151,6 +165,7 @@ export default function App() {
       })
       setImportState(null)
       if (incoming.length === 0) return
+      pushHistory()
       savePhotos(incoming) // survive reloads — blobs to IndexedDB, fire-and-forget
       setPhotos((prev) => {
         const next = new Map(prev)
@@ -211,8 +226,12 @@ export default function App() {
       setTilt(workspace.tilt ?? 0)
       setCornerRadius(workspace.cornerRadius ?? 0)
       setAspect(workspace.aspect ?? '4:5')
+      setCustomAspect(workspace.customAspect ?? { w: 4, h: 5 })
       setBorderW(workspace.borderW ?? 0)
       setBorderColor(workspace.borderColor ?? '#ffffff')
+      setBorderStyle(workspace.borderStyle ?? 'solid')
+      setLookStrength(workspace.lookStrength ?? 1)
+      setExportFormat(workspace.exportFormat ?? 'jpeg')
       setMeshSeams(new Set(workspace.meshSeams ?? []))
       setSizeBoosts(new Map(workspace.sizeBoosts ?? []))
       setSlideTemplates(new Map(workspace.slideTemplates ?? []))
@@ -240,8 +259,12 @@ export default function App() {
         tilt,
         cornerRadius,
         aspect,
+        customAspect,
         borderW,
         borderColor,
+        borderStyle,
+        lookStrength,
+        exportFormat,
         meshSeams: [...meshSeams],
         sizeBoosts: [...sizeBoosts],
         slideTemplates: [...slideTemplates],
@@ -250,7 +273,7 @@ export default function App() {
       })
     }, 800)
     return () => clearTimeout(t)
-  }, [restoring, photos, slides, tray, perSlide, gutter, bgMode, look, tilt, cornerRadius, aspect, borderW, borderColor, meshSeams, sizeBoosts, slideTemplates, captions])
+  }, [restoring, photos, slides, tray, perSlide, gutter, bgMode, look, tilt, cornerRadius, aspect, customAspect, borderW, borderColor, borderStyle, lookStrength, exportFormat, meshSeams, sizeBoosts, slideTemplates, captions])
 
   // Per-photo pan: nudge the crop's focal point inside its cell. The photo
   // object carries the new focal (so previews, exports, and the stored
@@ -258,6 +281,7 @@ export default function App() {
   const nudgeFocal = (photoId, dx, dy) => {
     const p = photos.get(photoId)
     if (!p) return
+    pushHistory(`nudge:${photoId}`)
     haptics.tap()
     const base = p.focal ?? { x: 0.5, y: 0.5 }
     const upd = {
@@ -275,6 +299,7 @@ export default function App() {
   const resetPhotoEdits = (photoId) => {
     const p = photos.get(photoId)
     if (!p) return
+    pushHistory()
     const upd = { ...p, focal: p.focalAuto ?? p.focal }
     setPhotos((prev) => new Map(prev).set(photoId, upd))
     savePhotos([upd])
@@ -304,9 +329,33 @@ export default function App() {
     setShowHints(false)
   }
 
+  // Duplicate a slide. Photos live in exactly one slide (drags, mesh and
+  // layouts all assume it), so the copy mints fresh photo ids that share the
+  // original blobs and metrics.
+  const duplicateSlide = (i) => {
+    const orig = slides[i]
+    if (!orig || slides.length >= MAX_SLIDES) return
+    pushHistory()
+    haptics.select()
+    const clones = orig.photoIds.map((id) => ({ ...photos.get(id), id: claimId() }))
+    savePhotos(clones)
+    setPhotos((prev) => {
+      const next = new Map(prev)
+      for (const c of clones) next.set(c.id, c)
+      return next
+    })
+    const copy = { key: `s${slideKeyCounter++}`, photoIds: clones.map((c) => c.id), seed: randomSeed() }
+    setSlides((prev) => [...prev.slice(0, i + 1), copy, ...prev.slice(i + 1)])
+    const cap = captions.get(orig.key)
+    if (cap) setCaptions((prev) => new Map(prev).set(copy.key, { ...cap }))
+    const tpl = slideTemplates.get(orig.key)
+    if (tpl) setSlideTemplates((prev) => new Map(prev).set(copy.key, tpl))
+  }
+
   // Start over: wipe the stored session and the workspace together.
   const startOver = () => {
     if (!window.confirm('Clear every photo and start over?')) return
+    pushHistory()
     haptics.warning()
     clearSession()
     setPhotos(new Map())
@@ -333,6 +382,12 @@ export default function App() {
         setTplEdit(null)
         setCapEdit(null)
         setMoreEdit(null)
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) keyActions.current.__redo?.()
+        else keyActions.current.__undo?.()
         return
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -377,6 +432,7 @@ export default function App() {
   }, [addFiles])
 
   const handlePerSlide = (per) => {
+    if (photos.size) pushHistory('perSlide')
     setPerSlide(per)
     if (photos.size) recompose(photos, per)
   }
@@ -480,6 +536,7 @@ export default function App() {
   const toggleSeam = (i) => {
     const key = seamKey(i)
     if (!key) return
+    pushHistory()
     haptics.select()
     setMeshSeams((prev) => {
       const next = new Set(prev)
@@ -489,6 +546,7 @@ export default function App() {
     })
   }
   const meshAll = () => {
+    pushHistory()
     haptics.tap()
     setMeshSeams(() => {
       const next = new Set()
@@ -499,6 +557,7 @@ export default function App() {
     })
   }
   const meshNone = () => {
+    pushHistory()
     haptics.tap()
     setMeshSeams(new Set())
   }
@@ -521,16 +580,17 @@ export default function App() {
     }
     ;(async () => {
       const cache = filterCache.current
+      const suffix = `:${look}@${lookStrength.toFixed(2)}`
       for (const key of [...cache.keys()]) {
-        if (!key.endsWith(`:${look}`)) cache.delete(key)
+        if (!key.endsWith(suffix)) cache.delete(key)
       }
       const map = new Map()
       let n = 0
       for (const p of photos.values()) {
-        const key = `${p.id}:${look}`
+        const key = `${p.id}${suffix}`
         let bmp = cache.get(key)
         if (!bmp && p.previewBitmap) {
-          bmp = await filteredBitmap(p.previewBitmap, matrixFor(p, look))
+          bmp = await filteredBitmap(p.previewBitmap, withStrength(matrixFor(p, look), lookStrength))
           cache.set(key, bmp)
         }
         if (bmp) map.set(p.id, bmp)
@@ -544,7 +604,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [photos, look])
+  }, [photos, look, lookStrength])
 
   // Once photos exist, the ambient field takes its light from them.
   const ambientColors = useMemo(() => {
@@ -558,10 +618,12 @@ export default function App() {
   const slideBgs = useMemo(() => {
     if (bgMode === 'dark') return slides.map(() => '#0d0d0d')
     if (bgMode === 'light') return slides.map(() => '#f2efe9')
+    if (bgMode.startsWith('#')) return slides.map(() => bgMode)
     return slides.map((s) => averageColor(s.photoIds.map((id) => photos.get(id)?.previewBitmap)))
   }, [bgMode, slides, photos])
 
   const shuffleSlide = (i) => {
+    pushHistory()
     // shuffling always shows something new — a pinned template unpins first
     const key = slides[i]?.key
     setSlideTemplates((prev) => {
@@ -585,6 +647,7 @@ export default function App() {
       avoid: lastLens.current,
     })
     lastLens.current = key
+    pushHistory()
     haptics.success()
     setSlides(groups.map((ids) => ({ key: `s${slideKeyCounter++}`, photoIds: ids, seed: randomSeed() })))
     setRemixNote({ label, at: randomSeed() })
@@ -599,6 +662,7 @@ export default function App() {
   const deleteSlide = (i) => {
     const removed = slides[i]
     if (!removed) return
+    pushHistory()
     haptics.warning()
     deletePhotos(removed.photoIds) // prune the stored blobs too
     setSlides((prev) => prev.filter((_, j) => j !== i))
@@ -612,6 +676,7 @@ export default function App() {
   }
 
   const addEmptySlide = () => {
+    pushHistory()
     setSlides((prev) =>
       prev.length >= MAX_SLIDES ? prev : [...prev, { key: `s${slideKeyCounter++}`, photoIds: [], seed: randomSeed() }],
     )
@@ -619,6 +684,7 @@ export default function App() {
 
   // reorder two photos within one slide: their rects trade places
   const swapPhotos = (slideKey, idA, idB) => {
+    pushHistory()
     haptics.select()
     setSlides((prev) =>
       prev.map((s) => (s.key === slideKey ? { ...s, swaps: [...(s.swaps ?? []), [idA, idB]] } : s)),
@@ -630,6 +696,7 @@ export default function App() {
   // Dragging a photo onto the bridge (or the bridge onto a photo) hands the
   // seam over to the other photo.
   const swapPhotoOrder = (slideKey, idA, idB) => {
+    pushHistory()
     haptics.select()
     setSlides((prev) =>
       prev.map((s) => {
@@ -646,6 +713,7 @@ export default function App() {
 
   // "−"/"+" on a slide: rebalance a boundary photo with a neighbouring slide
   const adjustSlide = (i, delta) => {
+    pushHistory()
     haptics.tap()
     setSlides((prev) => {
       const groups = prev.map((s) => s.photoIds)
@@ -659,6 +727,7 @@ export default function App() {
   }
 
   const moveSlide = (from, to) => {
+    pushHistory()
     setSlides((prev) => {
       if (to < 0 || to >= prev.length) return prev
       const next = [...prev]
@@ -666,6 +735,86 @@ export default function App() {
       next.splice(to, 0, s)
       return next
     })
+  }
+
+  // ---- undo / redo ----
+  //
+  // Snapshots cover the content state (photos map, slides, tray, seams,
+  // boosts, templates, captions) — style settings are cheap to redo by hand
+  // and would flood the stack. Maps/arrays are copied shallowly; photo
+  // objects are treated as immutable (edits like nudges replace them), so a
+  // snapshot is a handful of container copies, not a deep clone.
+  const stateRef = useRef(null)
+  stateRef.current = { photos, slides, tray, meshSeams, sizeBoosts, slideTemplates, captions }
+  const history = useRef({ past: [], future: [], lastTag: '', lastAt: 0 })
+  const [historyTick, setHistoryTick] = useState(0)
+
+  const snap = () => ({
+    photos: new Map(stateRef.current.photos),
+    slides: stateRef.current.slides,
+    tray: stateRef.current.tray,
+    meshSeams: new Set(stateRef.current.meshSeams),
+    sizeBoosts: new Map(stateRef.current.sizeBoosts),
+    slideTemplates: new Map(stateRef.current.slideTemplates),
+    captions: new Map(stateRef.current.captions),
+  })
+
+  // call BEFORE mutating; same-tag pushes within a second coalesce, so a
+  // slider drag is one history entry, not fifty
+  const pushHistory = (tag = '') => {
+    const h = history.current
+    const now = Date.now()
+    if (tag && h.lastTag === tag && now - h.lastAt < 1000) {
+      h.lastAt = now
+      return
+    }
+    h.lastTag = tag
+    h.lastAt = now
+    h.past.push(snap())
+    if (h.past.length > 60) h.past.shift()
+    h.future = []
+    setHistoryTick((t) => t + 1)
+  }
+
+  const applySnapshot = (s) => {
+    // keep the photo store in step: resurrect blobs an undo brings back,
+    // drop the ones a redo removes again
+    const cur = stateRef.current.photos
+    const back = []
+    const gone = []
+    for (const [id, p] of s.photos) if (!cur.has(id)) back.push(p)
+    for (const id of cur.keys()) if (!s.photos.has(id)) gone.push(id)
+    if (back.length) savePhotos(back)
+    if (gone.length) deletePhotos(gone)
+    setPhotos(s.photos)
+    setSlides(s.slides)
+    setTray(s.tray)
+    setMeshSeams(s.meshSeams)
+    setSizeBoosts(s.sizeBoosts)
+    setSlideTemplates(s.slideTemplates)
+    setCaptions(s.captions)
+  }
+
+  const undo = () => {
+    const h = history.current
+    const prev = h.past.pop()
+    if (!prev) return
+    haptics.tap()
+    h.future.push(snap())
+    h.lastTag = ''
+    applySnapshot(prev)
+    setHistoryTick((t) => t + 1)
+  }
+
+  const redo = () => {
+    const h = history.current
+    const next = h.future.pop()
+    if (!next) return
+    haptics.tap()
+    h.past.push(snap())
+    h.lastTag = ''
+    applySnapshot(next)
+    setHistoryTick((t) => t + 1)
   }
 
   // ---- playground: a shelf where photos sit out of every slide ----
@@ -680,6 +829,7 @@ export default function App() {
     const fromKey = slidesRef.current.find((s) => s.photoIds.includes(photoId))?.key ?? TRAY_KEY
     if (fromKey === toKey) return
     if (toKey === ADD_KEY && slidesRef.current.length >= MAX_SLIDES) return
+    pushHistory()
     haptics.select()
     setTray((prev) => (toKey === TRAY_KEY ? [...prev, photoId] : prev.filter((id) => id !== photoId)))
     setSlides((prev) => {
@@ -699,6 +849,7 @@ export default function App() {
   const returnAllFromTray = () => {
     const parked = trayRef.current
     if (parked.length === 0) return
+    pushHistory()
     haptics.tap()
     setSlides((prev) => {
       const next = prev.length
@@ -847,10 +998,12 @@ export default function App() {
           ...exportOpts,
           bgs: filled.map((x) => x.bg),
           look,
+          lookStrength,
           tilt,
           radius: cornerRadius,
-          border: borderW > 0 ? { width: borderW, color: borderColor } : null,
+          border: borderW > 0 ? { width: borderW, color: borderColor, style: borderStyle } : null,
           captions,
+          format: exportFormat,
         },
         (done, total) => setExportState({ done, total }),
       )
@@ -868,12 +1021,14 @@ export default function App() {
       ...exportOpts,
       bg: slideBgs[i],
       look,
+      lookStrength,
       tilt,
       radius: cornerRadius,
-      border: borderW > 0 ? { width: borderW, color: borderColor } : null,
+      border: borderW > 0 ? { width: borderW, color: borderColor, style: borderStyle } : null,
       caption: captions.get(slides[i].key) ?? null,
+      format: exportFormat,
     })
-    saveBlob(blob, slideFileName(i))
+    saveBlob(blob, slideFileName(i, exportFormat))
   }
 
   // one definition of a slide's actions, rendered inline on desktop and as
@@ -891,6 +1046,12 @@ export default function App() {
       fn: (e) => setCapEdit({ slideKey: slide.key, x: e?.clientX ?? 0, y: e?.clientY ?? 0 }),
       disabled: slide.photoIds.length === 0,
     },
+    {
+      Icon: CopyIcon,
+      label: 'Duplicate this slide',
+      fn: () => duplicateSlide(i),
+      disabled: slide.photoIds.length === 0 || slides.length >= MAX_SLIDES,
+    },
     { Icon: ShuffleIcon, label: 'Shuffle this slide', fn: () => shuffleSlide(i), disabled: slide.photoIds.length === 0 },
     {
       Icon: DownloadSimpleIcon,
@@ -905,18 +1066,22 @@ export default function App() {
   const busyImporting = importState != null
 
   // single-letter shortcuts, hinted in the dock button titles
-  keyActions.current = hasPhotos
-    ? {
-        r: remixAll,
-        d: downloadAll,
-        o: () => setOptionsOpen((o) => !o),
-        f: () => {
-          const order = LOOKS.map((l) => l.key)
-          setLook((cur) => order[(order.indexOf(cur) + 1) % order.length])
-          haptics.tap()
-        },
-      }
-    : {}
+  keyActions.current = {
+    __undo: undo,
+    __redo: redo,
+    ...(hasPhotos
+      ? {
+          r: remixAll,
+          d: downloadAll,
+          o: () => setOptionsOpen((o) => !o),
+          f: () => {
+            const order = LOOKS.map((l) => l.key)
+            setLook((cur) => order[(order.indexOf(cur) + 1) % order.length])
+            haptics.tap()
+          },
+        }
+      : {}),
+  }
 
   return (
     <div className="app">
@@ -1022,6 +1187,19 @@ export default function App() {
               }}
             />
           </div>
+          {look !== 'off' && (
+            <div className="strength-row">
+              <input
+                type="range"
+                min="20"
+                max="100"
+                value={Math.round(lookStrength * 100)}
+                aria-label="Filter strength"
+                onChange={(e) => setLookStrength(Number(e.target.value) / 100)}
+              />
+              <span className="strength-value">{Math.round(lookStrength * 100)}%</span>
+            </div>
+          )}
           {busyImporting && (
             <div className="importing-inline">
               Reading {importState.done}/{importState.total}…
@@ -1139,7 +1317,7 @@ export default function App() {
                     imagesOverride={lookImages}
                     tilt={tilt}
                     radius={cornerRadius}
-                    border={borderW > 0 ? { width: borderW, color: borderColor } : null}
+                    border={borderW > 0 ? { width: borderW, color: borderColor, style: borderStyle } : null}
                     caption={captions.get(slide.key) ?? null}
                     animKey={`${slide.key}:${slide.seed}:${slide.photoIds.join(',')}:${aspect}:${gutter}:${(slide.swaps ?? []).length}:${slide.photoIds.map((id) => sizeBoosts.get(id) ?? 1).join('_')}:${slideTemplates.get(slide.key) ?? ''}`}
                     onPhotoPointerDown={(e, photoId) => startPhotoDrag(e, slide.key, photoId)}
@@ -1258,6 +1436,18 @@ export default function App() {
             ))}
             {borderW > 0 && (
               <div className="control">
+                <span className="control-label">Border style</span>
+                <div className="segmented" role="group" aria-label="Border style">
+                  {['solid', 'double', 'dashed'].map((s) => (
+                    <button key={s} className={borderStyle === s ? 'active' : ''} onClick={() => setBorderStyle(s)}>
+                      {s[0].toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {borderW > 0 && (
+              <div className="control">
                 <span className="control-label">Border colour</span>
                 <div className="swatches">
                   {['#ffffff', '#0d0d0d', '#f6f4ef'].map((c) => (
@@ -1285,14 +1475,54 @@ export default function App() {
                     onClick={() => setBgMode(s.key)}
                   />
                 ))}
+                <input
+                  type="color"
+                  className={`swatch swatch-pick ${bgMode.startsWith('#') ? 'active' : ''}`}
+                  value={bgMode.startsWith('#') ? bgMode : '#22242c'}
+                  aria-label="Custom background colour"
+                  title="Pick any colour"
+                  onChange={(e) => setBgMode(e.target.value)}
+                />
               </div>
             </div>
             <div className="control">
               <span className="control-label">Aspect</span>
               <div className="segmented">
-                {['4:5', '1:1', '9:16'].map((a) => (
+                {['4:5', '1:1', '9:16', 'custom'].map((a) => (
                   <button key={a} className={aspect === a ? 'active' : ''} onClick={() => setAspect(a)}>
-                    {a}
+                    {a === 'custom' ? '…' : a}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {aspect === 'custom' && (
+              <div className="control">
+                <span className="control-label">
+                  Custom ratio <b>{customAspect.w}:{customAspect.h}</b>
+                </span>
+                <div className="ratio-inputs">
+                  {['w', 'h'].map((k) => (
+                    <input
+                      key={k}
+                      type="number"
+                      min="1"
+                      max="32"
+                      value={customAspect[k]}
+                      aria-label={k === 'w' ? 'Ratio width' : 'Ratio height'}
+                      onChange={(e) =>
+                        setCustomAspect((c) => ({ ...c, [k]: Math.max(1, Math.min(32, Number(e.target.value) || 1)) }))
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="control">
+              <span className="control-label">Export</span>
+              <div className="segmented" role="group" aria-label="Export format">
+                {['jpeg', 'png'].map((f) => (
+                  <button key={f} className={exportFormat === f ? 'active' : ''} onClick={() => setExportFormat(f)}>
+                    {f.toUpperCase()}
                   </button>
                 ))}
               </div>
@@ -1329,19 +1559,39 @@ export default function App() {
             </div>
           )}
           <div className="dock-row">
-            <span className="counts dock-stats" aria-live="polite">
-              {photos.size}
-              <span className="cw"> photos</span>
-              {' · '}
-              {slides.length}
-              <span className="cw"> slides</span>
-              {tray.length > 0 && (
-                <>
-                  {' · '}
-                  {tray.length}
-                  <span className="cw"> aside</span>
-                </>
-              )}
+            <span className="dock-stats">
+              <span className="counts" aria-live="polite">
+                {photos.size}
+                <span className="cw"> photos</span>
+                {' · '}
+                {slides.length}
+                <span className="cw"> slides</span>
+                {tray.length > 0 && (
+                  <>
+                    {' · '}
+                    {tray.length}
+                    <span className="cw"> aside</span>
+                  </>
+                )}
+              </span>
+              <button
+                className="lobe-btn"
+                onClick={undo}
+                disabled={history.current.past.length === 0}
+                aria-label="Undo"
+                title="Undo (⌘Z)"
+              >
+                <ArrowUUpLeftIcon size={14} weight="bold" />
+              </button>
+              <button
+                className="lobe-btn"
+                onClick={redo}
+                disabled={history.current.future.length === 0}
+                aria-label="Redo"
+                title="Redo (⇧⌘Z)"
+              >
+                <ArrowUUpRightIcon size={14} weight="bold" />
+              </button>
             </span>
             <nav className="dock" aria-label="Actions">
             <button
@@ -1465,6 +1715,7 @@ export default function App() {
             <button
               className={`tpl-option ${!slideTemplates.get(tplEdit.slideKey) ? 'active' : ''}`}
               onClick={() => {
+                pushHistory()
                 setSlideTemplates((prev) => {
                   const next = new Map(prev)
                   next.delete(tplEdit.slideKey)
@@ -1480,7 +1731,10 @@ export default function App() {
                 key={t.id}
                 data-template={t.id}
                 className={`tpl-option ${slideTemplates.get(tplEdit.slideKey) === t.id ? 'active' : ''}`}
-                onClick={() => setSlideTemplates((prev) => new Map(prev).set(tplEdit.slideKey, t.id))}
+                onClick={() => {
+                  pushHistory()
+                  setSlideTemplates((prev) => new Map(prev).set(tplEdit.slideKey, t.id))
+                }}
               >
                 <span className="tpl-preview" style={{ aspectRatio: `${canvasW} / ${canvasH}` }}>
                   {t.cells.map((c, j) => (
@@ -1531,6 +1785,7 @@ export default function App() {
             autoFocus
             onChange={(e) => {
               const text = e.target.value
+              pushHistory(`cap:${capEdit.slideKey}`)
               setCaptions((prev) => {
                 const next = new Map(prev)
                 if (!text) next.delete(capEdit.slideKey)
@@ -1587,6 +1842,7 @@ export default function App() {
               onChange={(e) => {
                 const v = Number(e.target.value) / 100
                 const prev = sizeBoosts.get(sizeEdit.photoId) ?? 1
+                pushHistory(`size:${sizeEdit.photoId}`)
                 if (prev !== v && (prev - 1) * (v - 1) <= 0) haptics.detent()
                 setSizeBoosts((prev) => {
                   const next = new Map(prev)

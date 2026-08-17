@@ -9,7 +9,7 @@ const EXPORT_QUALITY = 0.95
 
 import JSZip from 'jszip'
 import { drawSlide } from './render.js'
-import { matrixFor, applyMatrix } from './filters.js'
+import { matrixFor, applyMatrix, withStrength } from './filters.js'
 
 async function decodeFull(blob) {
   try {
@@ -20,9 +20,9 @@ async function decodeFull(blob) {
 }
 
 // Full-size decode with the look's colour matrix baked in (Safari-safe).
-async function decodeFiltered(photo, look) {
+async function decodeFiltered(photo, look, strength = 1) {
   const bmp = await decodeFull(photo.blob)
-  const m = matrixFor(photo, look)
+  const m = withStrength(matrixFor(photo, look), strength)
   if (!m) return bmp
   const canvas = new OffscreenCanvas(bmp.width, bmp.height)
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
@@ -38,7 +38,7 @@ export async function renderSlideBlob(
   slide,
   layout,
   photosById,
-  { width, height, bg, look, tilt = 0, radius = 0, border = null, caption = null },
+  { width, height, bg, look, lookStrength = 1, tilt = 0, radius = 0, border = null, caption = null, format = 'jpeg' },
 ) {
   const images = new Map()
   const focals = new Map()
@@ -50,7 +50,7 @@ export async function renderSlideBlob(
       neededIds.map(async (id) => {
         const photo = photosById.get(id)
         if (!photo) return
-        images.set(id, await decodeFiltered(photo, look))
+        images.set(id, await decodeFiltered(photo, look, lookStrength))
         if (photo.focal) focals.set(id, photo.focal)
       }),
     )
@@ -59,21 +59,23 @@ export async function renderSlideBlob(
     ctx.imageSmoothingQuality = 'high'
     ctx.scale(EXPORT_SCALE, EXPORT_SCALE)
     drawSlide(ctx, { width, height, bg, photoIds: slide.photoIds, rects, images, tilt, radius, bridges, focals, border, caption })
-    return await canvas.convertToBlob({ type: 'image/jpeg', quality: EXPORT_QUALITY })
+    return format === 'png'
+      ? await canvas.convertToBlob({ type: 'image/png' })
+      : await canvas.convertToBlob({ type: 'image/jpeg', quality: EXPORT_QUALITY })
   } finally {
     for (const img of images.values()) img.close?.()
   }
 }
 
-export function slideFileName(index) {
-  return String(index + 1).padStart(2, '0') + '.jpg'
+export function slideFileName(index, format = 'jpeg') {
+  return String(index + 1).padStart(2, '0') + (format === 'png' ? '.png' : '.jpg')
 }
 
 export async function exportAllAsZip(
   slides,
   layouts,
   photosById,
-  { width, height, bgs, look, tilt, radius, border, captions },
+  { width, height, bgs, look, lookStrength, tilt, radius, border, captions, format },
   onProgress,
 ) {
   const zip = new JSZip()
@@ -84,12 +86,14 @@ export async function exportAllAsZip(
       height,
       bg: bgs[i],
       look,
+      lookStrength,
       tilt,
       radius,
       border,
       caption: captions?.get(slides[i].key) ?? null,
+      format,
     })
-    zip.file(slideFileName(i), blob)
+    zip.file(slideFileName(i, format), blob)
   }
   onProgress?.(slides.length, slides.length)
   return zip.generateAsync({ type: 'blob' })

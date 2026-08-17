@@ -311,10 +311,11 @@ canvas {
   bottom: calc(100% - 2px);
   left: 26px;
   z-index: 0;
-  display: inline-block;
-  line-height: 30px;
-  height: 30px;
-  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 8px 0 14px;
   border-radius: 15px 15px 0 0;
   color: var(--label-secondary);
   font-size: var(--text-caption1);
@@ -1446,6 +1447,94 @@ body[data-dragging='1'] .mesh-link {
     place-items: end center;
     padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
   }
+}
+
+/* undo / redo riding in the lobe */
+.lobe-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--label-secondary);
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+}
+
+.lobe-btn:hover:not(:disabled) {
+  color: var(--label-primary);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.lobe-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* filter strength — one slim dial under the look strip */
+.strength-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin: calc(-1 * var(--space-2)) 0 var(--space-3);
+}
+
+.strength-row input[type='range'] {
+  width: 170px;
+}
+
+.strength-value {
+  color: var(--label-secondary);
+  font-size: var(--text-caption1);
+  width: 36px;
+}
+
+/* the free colour well next to the fixed swatches */
+input.swatch-pick {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+input.swatch-pick::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+input.swatch-pick::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+input.swatch-pick.active {
+  box-shadow:
+    0 0 0 2px var(--bg-base),
+    0 0 0 4px var(--system-blue);
+}
+
+.ratio-inputs {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.ratio-inputs input {
+  width: 64px;
+  padding: 8px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--label-primary);
+  font-family: inherit;
+  font-size: var(--text-subhead);
 }
 
 /* ---------- action sheet (mobile ⋯ menu) ---------- */

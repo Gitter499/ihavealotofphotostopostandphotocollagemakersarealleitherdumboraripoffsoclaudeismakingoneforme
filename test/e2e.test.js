@@ -181,7 +181,7 @@ try {
 
   // switch to manual 6 per slide for the deterministic assertions below
   await openOptions()
-  await page.locator('input[type="range"]').first().fill('6')
+  await page.locator('.options-popover input[type="range"]').first().fill('6')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
   await closeOptions()
   console.log('  ok  manual 6 per slide → 5 slides (via options popover)')
@@ -212,10 +212,10 @@ try {
 
   // more than 5 slides: lower photos-per-slide → 30 photos at 4 → 8 slides
   await openOptions()
-  await page.locator('input[type="range"]').first().fill('4')
+  await page.locator('.options-popover input[type="range"]').first().fill('4')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 8, null, { timeout: 10000 })
   console.log('  ok  photos-per-slide 4 regroups 30 photos into 8 slides (>5, cap is 20)')
-  await page.locator('input[type="range"]').first().fill('6')
+  await page.locator('.options-popover input[type="range"]').first().fill('6')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
   await closeOptions()
 
@@ -283,6 +283,19 @@ try {
   await page.locator('[data-look="auto"]').click()
   console.log('  ok  filter bubbles render (Auto default, Off guard, Noir desaturates)')
 
+  // strength dial: 40% of a look is visibly different from 100%
+  const fullStrength = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  await page.locator('input[aria-label="Filter strength"]').fill('40')
+  await page.waitForTimeout(700)
+  assert.notEqual(
+    await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL()),
+    fullStrength,
+    'strength dial did not change the render',
+  )
+  await page.locator('input[aria-label="Filter strength"]').fill('100')
+  await page.waitForTimeout(700)
+  console.log('  ok  filter strength dial blends the look')
+
   // Auto chip returns to dynamic grouping
   await openOptions()
   await page.locator('button.chip', { hasText: 'Auto' }).click()
@@ -292,7 +305,7 @@ try {
     { timeout: 10000 },
   )
   console.log('  ok  Auto chip restores dynamic grouping')
-  await page.locator('input[type="range"]').first().fill('6')
+  await page.locator('.options-popover input[type="range"]').first().fill('6')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
   await closeOptions()
 
@@ -352,8 +365,8 @@ try {
   console.log('  ok  Remix regroups everything under a fresh lens, twice in a row differently')
   // back to the deterministic 5×6 arrangement for the tests below
   await openOptions()
-  await page.locator('input[type="range"]').first().fill('5')
-  await page.locator('input[type="range"]').first().fill('6')
+  await page.locator('.options-popover input[type="range"]').first().fill('5')
+  await page.locator('.options-popover input[type="range"]').first().fill('6')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
   await closeOptions()
 
@@ -494,10 +507,29 @@ try {
     'every photo must be back on a slide',
   )
   console.log('  ok  playground parks photos through remixes; drag-back and Return all restore them')
+
+  // undo/redo: a stepper move reverses with Ctrl+Z and replays with Ctrl+Shift+Z
+  const undoCounts = () =>
+    page.evaluate(() => [...document.querySelectorAll('.slide-count')].map((el) => parseInt(el.textContent, 10)))
+  const preStep = await undoCounts()
+  await page.locator('[aria-label="Fewer photos on this slide"]').first().click()
+  await page.waitForTimeout(400)
+  const stepped = await undoCounts()
+  assert.notDeepEqual(stepped, preStep, 'stepper should change counts')
+  await page.keyboard.press('Control+z')
+  await page.waitForTimeout(400)
+  assert.deepEqual(await undoCounts(), preStep, 'undo should restore the counts')
+  await page.keyboard.press('Control+Shift+z')
+  await page.waitForTimeout(400)
+  assert.deepEqual(await undoCounts(), stepped, 'redo should replay the change')
+  await page.keyboard.press('Control+z')
+  await page.waitForTimeout(400)
+  assert.deepEqual(await undoCounts(), preStep, 'second undo should settle back')
+  console.log('  ok  undo and redo walk the history (lobe buttons wired to the same stack)')
   // deterministic 5×6 again for the tests below
   await openOptions()
-  await page.locator('input[type="range"]').first().fill('5')
-  await page.locator('input[type="range"]').first().fill('6')
+  await page.locator('.options-popover input[type="range"]').first().fill('5')
+  await page.locator('.options-popover input[type="range"]').first().fill('6')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
   await closeOptions()
 
@@ -514,6 +546,24 @@ try {
   const one = jpegSize(readFileSync(onePath))
   assert.deepEqual(one, { height: 1440, width: 1440 })
   console.log('  ok  1:1 aspect exports 1440×1440')
+
+  // PNG export: the format toggle changes the single-slide download
+  await openOptions()
+  await page.locator('[aria-label="Export format"]').getByRole('button', { name: 'PNG' }).click()
+  await closeOptions()
+  const [dlPng] = await Promise.all([
+    page.waitForEvent('download', { timeout: 60000 }),
+    page.locator('.slide-card').first().locator('[aria-label="Download this slide"]').click(),
+  ])
+  assert.match(dlPng.suggestedFilename(), /\.png$/, 'download should be a .png')
+  const pngPath = join(tmp, 'one.png')
+  await dlPng.saveAs(pngPath)
+  const pngBuf = readFileSync(pngPath)
+  assert.equal(pngBuf.readUInt32BE(0), 0x89504e47, 'not a PNG file')
+  await openOptions()
+  await page.locator('[aria-label="Export format"]').getByRole('button', { name: 'JPEG' }).click()
+  await closeOptions()
+  console.log('  ok  PNG export toggle produces real PNGs')
 
   // add-slide skeleton: appends an empty slide, fillable via its stepper
   const slidesBefore = await page.locator('.slide-card').count()
@@ -536,13 +586,13 @@ try {
   // tilt + corner rounding restyle the composition (preview pixels change)
   await openOptions()
   const plain = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
-  await page.locator('input[type="range"]').nth(2).fill('5')
-  await page.locator('input[type="range"]').nth(3).fill('20')
+  await page.locator('.options-popover input[type="range"]').nth(2).fill('5')
+  await page.locator('.options-popover input[type="range"]').nth(3).fill('20')
   await page.waitForTimeout(400)
   const styled = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
   assert.notEqual(plain, styled, 'tilt/corners did not change the render')
-  await page.locator('input[type="range"]').nth(2).fill('0')
-  await page.locator('input[type="range"]').nth(3).fill('0')
+  await page.locator('.options-popover input[type="range"]').nth(2).fill('0')
+  await page.locator('.options-popover input[type="range"]').nth(3).fill('0')
   console.log('  ok  tilt and corner sliders restyle the slides')
 
   // mesh, per seam: every seam shows a link chip; tapping one meshes just it
@@ -702,10 +752,10 @@ try {
   // border slider strokes every photo; 9:16 reshapes the canvas
   await openOptions()
   const preBorder = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
-  await page.locator('input[type="range"]').nth(4).fill('6')
+  await page.locator('.options-popover input[type="range"]').nth(4).fill('6')
   await page.waitForTimeout(500)
   assert.notEqual(await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL()), preBorder, 'border did not draw')
-  await page.locator('input[type="range"]').nth(4).fill('0')
+  await page.locator('.options-popover input[type="range"]').nth(4).fill('0')
   await page.getByRole('button', { name: '9:16' }).click()
   await page.waitForTimeout(900)
   const storyBox = await page.locator('.slide-canvas').first().boundingBox()
@@ -750,25 +800,26 @@ try {
   // phone width: the tally is fused into the dock — one “p”-shaped bar
   await page.setViewportSize({ width: 390, height: 844 })
   await page.waitForTimeout(400)
-  const countsBox = await page.locator('.counts').boundingBox()
+  const lobeBox = await page.locator('.dock-stats').boundingBox()
   const dockBox = await page.locator('.dock').boundingBox()
   // the lobe rises from the bar: it starts above the dock's top edge and its
-  // lower half overlaps behind it — one fused silhouette
+  // lower edge overlaps into it — one fused silhouette
   assert.ok(
-    countsBox &&
-      countsBox.y < dockBox.y &&
-      countsBox.y + countsBox.height > dockBox.y &&
-      countsBox.y + countsBox.height < dockBox.y + dockBox.height,
-    `the tally lobe should rise fused from the dock's top (${JSON.stringify({ countsBox, dockBox })})`,
+    lobeBox &&
+      lobeBox.y < dockBox.y &&
+      lobeBox.y + lobeBox.height > dockBox.y &&
+      lobeBox.y + lobeBox.height < dockBox.y + dockBox.height,
+    `the tally lobe should rise fused from the dock's top (${JSON.stringify({ lobeBox, dockBox })})`,
   )
-  assert.ok(countsBox.x >= 0 && dockBox.x + dockBox.width <= 391, 'the fused bar must fit the phone width')
+  assert.ok(lobeBox.x >= 0 && dockBox.x + dockBox.width <= 391, 'the fused bar must fit the phone width')
+  assert.ok(await page.locator('.counts').isVisible(), 'the tally text stays visible in the lobe')
 
   // phone width declutters: slide actions collapse behind one ⋯ button that
   // opens a bottom action sheet, and editors anchor to the thumb zone
   assert.equal(await page.locator('[aria-label="Layout template"]').count(), 0, 'inline actions should hide on phones')
   await page.locator('[aria-label="Slide actions"]').first().click()
   await page.waitForTimeout(400)
-  assert.equal(await page.locator('.action-sheet .sheet-row').count(), 5, 'action sheet should list all five actions')
+  assert.equal(await page.locator('.action-sheet .sheet-row').count(), 6, 'action sheet should list all six actions')
   // the spring animation overshoots on entry — wait for the sheet to settle
   await page.waitForFunction(
     () => Math.abs(document.querySelector('.action-sheet').getBoundingClientRect().bottom - window.innerHeight) < 2,

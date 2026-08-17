@@ -64,11 +64,7 @@ function drawCover(
   if (e >= 1 && !rotation && !radius && !frame) {
     const { sx, sy, sw, sh } = coverCrop(iw, ih, rect.w / rect.h, focal)
     ctx.drawImage(img, sx, sy, sw, sh, rect.x, rect.y, rect.w, rect.h)
-    if (border?.width) {
-      ctx.lineWidth = border.width
-      ctx.strokeStyle = border.color
-      ctx.strokeRect(rect.x + border.width / 2, rect.y + border.width / 2, rect.w - border.width, rect.h - border.width)
-    }
+    if (border?.width) strokeBorder(ctx, rect.x, rect.y, rect.w, rect.h, 0, border)
     return
   }
   ctx.save()
@@ -98,15 +94,32 @@ function drawCover(
   }
   const { sx, sy, sw, sh } = coverCrop(iw, ih, pw / ph, focal)
   ctx.drawImage(img, sx, sy, sw, sh, px, py, pw, ph)
-  if (border?.width && !frame) {
-    ctx.lineWidth = border.width
-    ctx.strokeStyle = border.color
+  if (border?.width && !frame) strokeBorder(ctx, px, py, pw, ph, radius, border)
+  ctx.restore()
+}
+
+// Border styles are pure canvas strokes — solid, a fine double line, or a
+// hand-tick dashed edge — inset so the stroke never bleeds outside the photo.
+function strokeBorder(ctx, x, y, w, h, radius, border) {
+  const bw = border.width
+  ctx.save()
+  ctx.strokeStyle = border.color
+  ctx.setLineDash(border.style === 'dashed' ? [bw * 2.4, bw * 1.8] : [])
+  const line = (inset, width) => {
+    ctx.lineWidth = width
     if (radius > 0) {
-      roundedRectPath(ctx, px + border.width / 2, py + border.width / 2, pw - border.width, ph - border.width, radius)
+      roundedRectPath(ctx, x + inset, y + inset, w - 2 * inset, h - 2 * inset, Math.max(1, radius - inset))
       ctx.stroke()
     } else {
-      ctx.strokeRect(px + border.width / 2, py + border.width / 2, pw - border.width, ph - border.width)
+      ctx.strokeRect(x + inset, y + inset, w - 2 * inset, h - 2 * inset)
     }
+  }
+  if (border.style === 'double') {
+    const t = Math.max(1, bw / 3)
+    line(t / 2, t)
+    line(bw * 1.6, t)
+  } else {
+    line(bw / 2, bw)
   }
   ctx.restore()
 }
