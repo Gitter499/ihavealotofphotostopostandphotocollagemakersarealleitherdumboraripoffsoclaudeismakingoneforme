@@ -44,12 +44,34 @@ function analyze(bmp) {
   const d = cx.getImageData(0, 0, S, S).data
   const luma = new Float32Array(S * S)
   let mean = 0
+  let rSum = 0
+  let gSum = 0
+  let bSum = 0
   for (let i = 0; i < S * S; i++) {
     const l = 0.2126 * d[i * 4] + 0.7152 * d[i * 4 + 1] + 0.0722 * d[i * 4 + 2]
     luma[i] = l
     mean += l
+    rSum += d[i * 4]
+    gSum += d[i * 4 + 1]
+    bSum += d[i * 4 + 2]
   }
   mean /= S * S
+
+  // average colour → hue/saturation, for palette-coherent grouping
+  const rn = rSum / (S * S) / 255
+  const gn = gSum / (S * S) / 255
+  const bn = bSum / (S * S) / 255
+  const cMax = Math.max(rn, gn, bn)
+  const cMin = Math.min(rn, gn, bn)
+  const delta = cMax - cMin
+  let hue = 0
+  if (delta > 0) {
+    if (cMax === rn) hue = (((gn - bn) / delta + 6) % 6) * 60
+    else if (cMax === gn) hue = ((bn - rn) / delta + 2) * 60
+    else hue = ((rn - gn) / delta + 4) * 60
+  }
+  const lightness = (cMax + cMin) / 2
+  const sat = delta === 0 ? 0 : delta / (1 - Math.abs(2 * lightness - 1))
 
   let varSum = 0
   for (let i = 0; i < S * S; i++) {
@@ -101,7 +123,7 @@ function analyze(bmp) {
     if (i < 32) hi = ((hi << 1) | bit) >>> 0
     else lo = ((lo << 1) | bit) >>> 0
   }
-  return { quality, hash: [hi, lo] }
+  return { quality, hash: [hi, lo], hue, sat, luma: mean / 255, contrast }
 }
 
 async function process(id, blob, name, date) {
@@ -139,7 +161,21 @@ async function process(id, blob, name, date) {
     const preview = pc.transferToImageBitmap()
     const metrics = analyze(bmp)
     postMessage(
-      { type: 'done', id, blob: stored, width, height, date, preview, quality: metrics.quality, hash: metrics.hash },
+      {
+        type: 'done',
+        id,
+        blob: stored,
+        width,
+        height,
+        date,
+        preview,
+        quality: metrics.quality,
+        hash: metrics.hash,
+        hue: metrics.hue,
+        sat: metrics.sat,
+        luma: metrics.luma,
+        contrast: metrics.contrast,
+      },
       [preview],
     )
   } catch (err) {

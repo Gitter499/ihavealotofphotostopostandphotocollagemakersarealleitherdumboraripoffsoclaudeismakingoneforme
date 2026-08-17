@@ -649,7 +649,15 @@ input[type='range']::-moz-range-thumb {
   scroll-snap-align: start;
   transition:
     border-color var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-out);
+    box-shadow var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+/* playful pointer tilt — hover devices only, motion-gated */
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .slide-card {
+    transform: perspective(900px) rotateY(var(--tilt-x, 0deg)) rotateX(var(--tilt-y, 0deg));
+  }
 }
 
 .slide-card.drop-target {

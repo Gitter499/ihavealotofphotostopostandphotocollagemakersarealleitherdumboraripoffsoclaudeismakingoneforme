@@ -93,6 +93,10 @@ function runImport(list, { onPhoto, onSkip, onProgress }) {
             date: msg.date,
             quality: msg.quality,
             hash: msg.hash,
+            hue: msg.hue,
+            sat: msg.sat,
+            luma: msg.luma,
+            contrast: msg.contrast,
           })
           finishOne()
           feed(worker)

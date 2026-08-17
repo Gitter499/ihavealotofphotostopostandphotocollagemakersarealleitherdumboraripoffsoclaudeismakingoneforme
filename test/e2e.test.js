@@ -197,8 +197,29 @@ try {
   await page.locator('input[type="range"]').first().fill('6')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
 
+  // filters: Off must actually change the rendered pixels back
+  const withFilter = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  await page.getByRole('button', { name: 'Off', exact: true }).click()
+  await page.waitForTimeout(300)
+  const withoutFilter = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  assert.notEqual(withFilter, withoutFilter, 'Filter Off did not change the render')
+  await page.getByRole('button', { name: 'Noir' }).click()
+  await page.waitForTimeout(300)
+  const noir = await page.evaluate(() => {
+    const c = document.querySelector('.slide-canvas')
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data
+    let colored = 0
+    for (let i = 0; i < d.length; i += 40) {
+      if (Math.abs(d[i] - d[i + 1]) > 6 || Math.abs(d[i + 1] - d[i + 2]) > 6) colored++
+    }
+    return colored
+  })
+  assert.equal(noir, 0, `Noir left ${noir} coloured samples`)
+  await page.locator('.segmented').nth(0).getByRole('button', { name: 'Auto' }).click()
+  console.log('  ok  filters render (Auto default, Off guard, Noir desaturates)')
+
   // Auto chip returns to dynamic grouping
-  await page.getByRole('button', { name: 'Auto' }).click()
+  await page.locator('button.chip', { hasText: 'Auto' }).click()
   await page.waitForFunction(
     () => /30 photos · \d+ slides/.test(document.querySelector('.counts')?.textContent || ''),
     null,

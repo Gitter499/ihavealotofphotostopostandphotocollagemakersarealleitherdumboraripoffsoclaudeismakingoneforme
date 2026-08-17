@@ -1,14 +1,19 @@
 import { useEffect, useRef } from 'react'
-import { drawSlide, makeStagger } from '../lib/render.js'
+import { drawSlide, makeStagger, easeOut, lerpRect } from '../lib/render.js'
 
 const BACKING_W = 640
+const MORPH_MS = 420
 
-// Preview canvas for one slide. Handles the compose animation (staggered
-// settle, ≤800ms, skipped under prefers-reduced-motion) and pointer-down hit
-// testing so photos can be dragged out to another slide.
-export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, bg, animKey, onPhotoPointerDown }) {
+// Preview canvas for one slide. Three draw modes:
+//  - entrance: staggered settle (≤800ms) the first time photos appear
+//  - morph: photos glide/resize from their old rects to the new layout
+//    (shuffle, gutter, aspect changes) — FLIP on canvas
+//  - static: plain redraw (filter/background changes)
+// All motion collapses to a static draw under prefers-reduced-motion.
+export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, bg, filters, animKey, onPhotoPointerDown }) {
   const ref = useRef(null)
   const lastAnimKey = useRef(null)
+  const shownRects = useRef(null) // Map id → rect currently on screen
 
   useEffect(() => {
     const canvas = ref.current
@@ -23,28 +28,53 @@ export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, b
       const p = photos.get(id)
       if (p?.previewBitmap) images.set(id, p.previewBitmap)
     }
-    const draw = (progressOf) => {
+    const filterOf = filters ? (i) => filters[i] : null
+    const draw = (rects, progressOf) => {
       ctx.setTransform(scale, 0, 0, scale, 0, 0)
-      drawSlide(ctx, { width: canvasW, height: canvasH, bg, photoIds: slide.photoIds, rects: layout.rects, images, progressOf })
+      drawSlide(ctx, { width: canvasW, height: canvasH, bg, photoIds: slide.photoIds, rects, images, progressOf, filterOf })
+      // remember what is actually on screen so an interrupted morph
+      // continues from where it is instead of jumping
+      shownRects.current = new Map(slide.photoIds.map((id, i) => [id, rects[i]]))
     }
+
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    const shouldAnimate = animKey !== lastAnimKey.current && !reduced
+    const keyChanged = animKey !== lastAnimKey.current
     lastAnimKey.current = animKey
-    if (!shouldAnimate) {
-      draw()
+
+    const prev = shownRects.current
+    const canMorph = prev && slide.photoIds.every((id) => prev.has(id))
+    let raf
+
+    if (reduced || !keyChanged) {
+      draw(layout.rects)
       return
     }
+
+    if (canMorph) {
+      // FLIP: interpolate every photo from where it was to where it belongs
+      const from = slide.photoIds.map((id) => prev.get(id))
+      const t0 = performance.now()
+      const tick = (t) => {
+        const raw = Math.min(1, (t - t0) / MORPH_MS)
+        const e = easeOut(raw)
+        draw(slide.photoIds.map((_, i) => lerpRect(from[i], layout.rects[i], e)))
+        if (raw < 1) raf = requestAnimationFrame(tick)
+      }
+      raf = requestAnimationFrame(tick)
+      return () => cancelAnimationFrame(raf)
+    }
+
+    // entrance: staggered settle
     const { totalMs, progressAt } = makeStagger(slide.photoIds.length)
-    let raf
     const t0 = performance.now()
     const tick = (t) => {
       const elapsed = t - t0
-      draw((i) => progressAt(elapsed, i))
+      draw(layout.rects, (i) => progressAt(elapsed, i))
       if (elapsed < totalMs) raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [slide, layout, photos, canvasW, canvasH, bg, animKey])
+  }, [slide, layout, photos, canvasW, canvasH, bg, filters, animKey])
 
   const handlePointerDown = (e) => {
     if (!onPhotoPointerDown) return

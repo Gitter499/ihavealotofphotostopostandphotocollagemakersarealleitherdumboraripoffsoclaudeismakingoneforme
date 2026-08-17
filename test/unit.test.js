@@ -8,7 +8,9 @@ import {
   hammingDistance,
   effectiveQualities,
   groupPhotosAuto,
+  harmonizeColors,
 } from '../src/lib/grouping.js'
+import { filterFor } from '../src/lib/filters.js'
 import { computeLayout, cropLoss, MAX_CROP_LOSS } from '../src/lib/layout.js'
 import { mulberry32 } from '../src/lib/rng.js'
 
@@ -121,7 +123,7 @@ test('balancing only swaps near group boundaries (chronology roughly kept)', () 
 
 test('groupPhotos returns groups plus excluded tail', () => {
   const ids = Array.from({ length: 200 }, (_, i) => i + 1)
-  const { groups, excluded, notice } = groupPhotos(ids, () => 1, 6)
+  const { groups, excluded, notice } = groupPhotos(ids, () => ({ aspect: 1 }), 6)
   assert.equal(groups.length, 20)
   assert.equal(excluded.length, 40)
   assert.equal(notice.type, 'overflow')
@@ -130,6 +132,92 @@ test('groupPhotos returns groups plus excluded tail', () => {
 })
 
 const LAYOUT_OPTS = { canvasW: 1080, canvasH: 1350, margin: 16, gutter: 8, baseSeed: 12345 }
+
+// ---------- colour coherence ----------
+
+test('colour pass swaps a clashing boundary pair into coherent slides', () => {
+  const photos = {
+    1: { aspect: 1.5, hue: 30, sat: 0.8 },
+    2: { aspect: 1.5, hue: 30, sat: 0.8 },
+    3: { aspect: 1.5, hue: 30, sat: 0.8 },
+    4: { aspect: 1.5, hue: 210, sat: 0.8 }, // cool photo stuck in the warm slide
+    5: { aspect: 1.5, hue: 30, sat: 0.8 }, // warm photo stuck in the cool slide
+    6: { aspect: 1.5, hue: 210, sat: 0.8 },
+    7: { aspect: 1.5, hue: 210, sat: 0.8 },
+    8: { aspect: 1.5, hue: 210, sat: 0.8 },
+  }
+  const groups = [
+    [1, 2, 3, 4],
+    [5, 6, 7, 8],
+  ]
+  harmonizeColors(groups, (id) => photos[id])
+  const warm = (id) => photos[id].hue < 120
+  assert.ok(groups[0].every(warm), `warm slide still mixed: ${groups[0]}`)
+  assert.ok(groups[1].every((id) => !warm(id)), `cool slide still mixed: ${groups[1]}`)
+})
+
+test('colour swaps never cross orientation classes', () => {
+  const photos = {
+    1: { aspect: 1.5, hue: 30, sat: 0.8 },
+    2: { aspect: 1.5, hue: 30, sat: 0.8 },
+    3: { aspect: 1.5, hue: 30, sat: 0.8 },
+    4: { aspect: 0.75, hue: 210, sat: 0.8 }, // clashing but portrait
+    5: { aspect: 1.5, hue: 30, sat: 0.8 }, // landscape — would fix colour, wrong shape
+    6: { aspect: 0.75, hue: 210, sat: 0.8 },
+    7: { aspect: 1.5, hue: 210, sat: 0.8 },
+    8: { aspect: 0.75, hue: 210, sat: 0.8 },
+  }
+  const groups = [
+    [1, 2, 3, 4],
+    [5, 6, 7, 8],
+  ]
+  const beforeA = [...groups[0]]
+  harmonizeColors(groups, (id) => photos[id])
+  // photo 4 may only ever be exchanged for another portrait; the tempting
+  // landscape swap (4↔5) must not happen
+  assert.ok(!(groups[0].includes(5) && groups[1].includes(4)), 'cross-orientation swap happened')
+  const portraitCountA = groups[0].filter((id) => photos[id].aspect < 1).length
+  assert.equal(portraitCountA, beforeA.filter((id) => photos[id].aspect < 1).length, 'orientation mix changed')
+})
+
+test('washed-out photos do not drive colour swaps', () => {
+  const photos = {
+    1: { aspect: 1.5, hue: 30, sat: 0.02 },
+    2: { aspect: 1.5, hue: 30, sat: 0.02 },
+    3: { aspect: 1.5, hue: 30, sat: 0.02 },
+    4: { aspect: 1.5, hue: 210, sat: 0.02 },
+    5: { aspect: 1.5, hue: 30, sat: 0.02 },
+    6: { aspect: 1.5, hue: 210, sat: 0.02 },
+    7: { aspect: 1.5, hue: 210, sat: 0.02 },
+    8: { aspect: 1.5, hue: 210, sat: 0.02 },
+  }
+  const groups = [
+    [1, 2, 3, 4],
+    [5, 6, 7, 8],
+  ]
+  harmonizeColors(groups, (id) => photos[id])
+  // near-grey photos: cost deltas are ~0, order should be untouched
+  assert.deepEqual(groups, [
+    [1, 2, 3, 4],
+    [5, 6, 7, 8],
+  ])
+})
+
+// ---------- automatic filters ----------
+
+test('filterFor: Off is a hard guard, Auto adapts to the photo', () => {
+  assert.equal(filterFor({ luma: 0.2, contrast: 0.1 }, 'off'), null)
+  const dark = filterFor({ luma: 0.2, contrast: 0.5 }, 'auto')
+  const bright = filterFor({ luma: 0.85, contrast: 0.5 }, 'auto')
+  const db = Number(dark.match(/brightness\(([\d.]+)\)/)[1])
+  const bb = Number(bright.match(/brightness\(([\d.]+)\)/)[1])
+  assert.ok(db > 1, `dark photo should be lifted, got brightness ${db}`)
+  assert.ok(bb < 1, `bright photo should be pulled down, got brightness ${bb}`)
+  const flat = filterFor({ luma: 0.5, contrast: 0.1 }, 'auto')
+  assert.match(flat, /contrast\(1\.1/)
+  assert.match(filterFor({}, 'noir'), /grayscale\(1\)/)
+  assert.match(filterFor({}, 'film'), /sepia/)
+})
 
 // ---------- dynamic (Auto) grouping ----------
 

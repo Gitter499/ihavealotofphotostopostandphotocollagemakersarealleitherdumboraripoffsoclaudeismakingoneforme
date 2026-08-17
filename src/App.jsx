@@ -3,6 +3,8 @@ import { importFiles } from './lib/importer.js'
 import { sortPhotos, groupPhotos, groupPhotosAuto, effectiveQualities } from './lib/grouping.js'
 import { computeLayout } from './lib/layout.js'
 import { averageColor, ambientFrom } from './lib/colors.js'
+import { LOOKS, filterFor } from './lib/filters.js'
+import { fireConfetti } from './lib/confetti.js'
 import { exportAllAsZip, renderSlideBlob, slideFileName, saveBlob } from './lib/exportZip.js'
 import { randomSeed } from './lib/rng.js'
 import SlideCanvas from './components/SlideCanvas.jsx'
@@ -25,6 +27,7 @@ export default function App() {
   const [perSlide, setPerSlide] = useState('auto') // 'auto' | 4..8
   const [gutter, setGutter] = useState(8)
   const [bgMode, setBgMode] = useState('dark')
+  const [look, setLook] = useState('auto')
   const [aspect, setAspect] = useState('4:5')
   const [importState, setImportState] = useState(null) // {done, total}
   const [skipped, setSkipped] = useState([])
@@ -44,7 +47,7 @@ export default function App() {
     const { groups, notice } =
       per === 'auto'
         ? groupPhotosAuto(sortedIds, (id) => photosMap.get(id))
-        : groupPhotos(sortedIds, (id) => photosMap.get(id).aspect, per)
+        : groupPhotos(sortedIds, (id) => photosMap.get(id), per)
     setNotice(notice)
     setSlides(
       groups.map((ids, i) => ({
@@ -117,6 +120,11 @@ export default function App() {
         )
       }),
     [slides, photos, canvasW, canvasH, margin, gutter],
+  )
+
+  const slideFilters = useMemo(
+    () => slides.map((s) => s.photoIds.map((id) => filterFor(photos.get(id), look))),
+    [slides, photos, look],
   )
 
   // Once photos exist, the ambient field takes its light from them.
@@ -229,10 +237,13 @@ export default function App() {
     if (exportState) return
     setExportState({ done: 0, total: slides.length })
     try {
-      const zip = await exportAllAsZip(slides, layouts, photos, { ...exportOpts, bgs: slideBgs }, (done, total) =>
+      const zip = await exportAllAsZip(slides, layouts, photos, { ...exportOpts, bgs: slideBgs, look }, (done, total) =>
         setExportState({ done, total }),
       )
       saveBlob(zip, 'carousel.zip')
+      const btn = document.querySelector('.dock-btn-primary')
+      const box = btn?.getBoundingClientRect()
+      fireConfetti(box ? box.left + box.width / 2 : window.innerWidth / 2, box ? box.top : window.innerHeight - 60)
     } finally {
       setExportState(null)
     }
@@ -241,6 +252,7 @@ export default function App() {
     const blob = await renderSlideBlob(slides[i], layouts[i].rects, photos, {
       ...exportOpts,
       bg: slideBgs[i],
+      look,
     })
     saveBlob(blob, slideFileName(i))
   }
@@ -380,6 +392,16 @@ export default function App() {
               <input type="range" min="0" max="24" value={gutter} onChange={(e) => setGutter(Number(e.target.value))} />
             </label>
             <div className="control">
+              <span className="control-label">Filter</span>
+              <div className="segmented">
+                {LOOKS.map((l) => (
+                  <button key={l.key} className={look === l.key ? 'active' : ''} onClick={() => setLook(l.key)}>
+                    {l.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="control">
               <span className="control-label">Background</span>
               <div className="swatches">
                 {BG_SWATCHES.map((s) => (
@@ -418,6 +440,18 @@ export default function App() {
                 key={slide.key}
                 className={`slide-card glass-thin ${drag?.overKey === slide.key && drag.fromKey !== slide.key ? 'drop-target' : ''}`}
                 data-slide-key={slide.key}
+                onMouseMove={(e) => {
+                  if (drag || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+                  const box = e.currentTarget.getBoundingClientRect()
+                  const rx = ((e.clientX - box.left) / box.width - 0.5) * 5
+                  const ry = ((e.clientY - box.top) / box.height - 0.5) * -5
+                  e.currentTarget.style.setProperty('--tilt-x', `${rx.toFixed(2)}deg`)
+                  e.currentTarget.style.setProperty('--tilt-y', `${ry.toFixed(2)}deg`)
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.setProperty('--tilt-x', '0deg')
+                  e.currentTarget.style.setProperty('--tilt-y', '0deg')
+                }}
                 onDragOver={(e) => {
                   if (slideDragIndex.current != null) e.preventDefault()
                 }}
@@ -487,7 +521,8 @@ export default function App() {
                   canvasW={canvasW}
                   canvasH={canvasH}
                   bg={slideBgs[i]}
-                  animKey={`${slide.key}:${slide.seed}:${slide.photoIds.join(',')}:${aspect}`}
+                  filters={slideFilters[i]}
+                  animKey={`${slide.key}:${slide.seed}:${slide.photoIds.join(',')}:${aspect}:${gutter}`}
                   onPhotoPointerDown={(e, photoId) => startPhotoDrag(e, slide.key, photoId)}
                 />
               </div>

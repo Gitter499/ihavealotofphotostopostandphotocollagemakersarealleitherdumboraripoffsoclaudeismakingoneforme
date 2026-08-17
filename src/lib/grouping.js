@@ -98,6 +98,66 @@ export function balanceOrientations(groups, aspectOf) {
   return groups
 }
 
+// ---- colour coherence (subtle) ----
+//
+// After orientation balancing, a second neighbour-boundary pass swaps photos
+// between adjacent slides when it makes each slide's palette more coherent.
+// Swaps only happen between photos of the SAME orientation (so the packing
+// mix is preserved) and only near slide boundaries (so chronology holds).
+
+function hueDistance(a, b) {
+  let d = Math.abs(a - b) % 360
+  if (d > 180) d = 360 - d
+  return d / 180
+}
+
+// weighted sum of pairwise hue distances — washed-out photos barely count
+function groupColorCost(group, getPhoto) {
+  let cost = 0
+  for (let i = 0; i < group.length; i++) {
+    const a = getPhoto(group[i])
+    if (a?.hue == null) continue
+    for (let j = i + 1; j < group.length; j++) {
+      const b = getPhoto(group[j])
+      if (b?.hue == null) continue
+      const w = Math.min(a.sat ?? 0, b.sat ?? 0)
+      cost += hueDistance(a.hue, b.hue) * w
+    }
+  }
+  return cost
+}
+
+export function harmonizeColors(groups, getPhoto) {
+  const isPortraitPhoto = (id) => (getPhoto(id)?.aspect ?? 1) < 1
+  for (let pass = 0; pass < 2; pass++) {
+    for (let gi = 0; gi < groups.length - 1; gi++) {
+      const a = groups[gi]
+      const b = groups[gi + 1]
+      if (a.length < 3 || b.length < 3) continue
+      const aIdxs = [a.length - 1, a.length - 2]
+      const bIdxs = [0, 1]
+      for (const ai of aIdxs) {
+        for (const bi of bIdxs) {
+          if (ai < 0 || bi >= b.length) continue
+          const pa = getPhoto(a[ai])
+          const pb = getPhoto(b[bi])
+          if (pa?.hue == null || pb?.hue == null) continue
+          // near-grey photos have no meaningful palette — moving them is churn
+          if ((pa.sat ?? 0) < 0.15 || (pb.sat ?? 0) < 0.15) continue
+          if (isPortraitPhoto(a[ai]) !== isPortraitPhoto(b[bi])) continue // keep the orientation mix
+          const before = groupColorCost(a, getPhoto) + groupColorCost(b, getPhoto)
+          ;[a[ai], b[bi]] = [b[bi], a[ai]]
+          const after = groupColorCost(a, getPhoto) + groupColorCost(b, getPhoto)
+          if (after >= before - 1e-9) {
+            ;[a[ai], b[bi]] = [b[bi], a[ai]]
+          }
+        }
+      }
+    }
+  }
+  return groups
+}
+
 // ---- smarter selection: near-duplicate detection + quality demotion ----
 
 function popcount(v) {
@@ -151,7 +211,8 @@ export function effectiveQualities(ids, getPhoto) {
 }
 
 // Full grouping pipeline: sorted photo ids → array of id groups + notice.
-export function groupPhotos(sortedIds, aspectOf, perSlide) {
+// getPhoto(id) → { aspect, hue, sat, ... }
+export function groupPhotos(sortedIds, getPhoto, perSlide) {
   const { sizes, included, notice } = planSizes(sortedIds.length, perSlide)
   const groups = []
   let cursor = 0
@@ -159,7 +220,8 @@ export function groupPhotos(sortedIds, aspectOf, perSlide) {
     groups.push(sortedIds.slice(cursor, cursor + size))
     cursor += size
   }
-  balanceOrientations(groups, aspectOf)
+  balanceOrientations(groups, (id) => getPhoto(id)?.aspect ?? 1)
+  harmonizeColors(groups, getPhoto)
   return { groups, excluded: sortedIds.slice(included), notice }
 }
 
@@ -271,5 +333,6 @@ export function groupPhotosAuto(sortedIds, getPhoto) {
     g--
   }
   balanceOrientations(groups, (id) => getPhoto(id)?.aspect ?? 1)
+  harmonizeColors(groups, getPhoto)
   return { groups, excluded: sortedIds.slice(ids.length), notice }
 }
