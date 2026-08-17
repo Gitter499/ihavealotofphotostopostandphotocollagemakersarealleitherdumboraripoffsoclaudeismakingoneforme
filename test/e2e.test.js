@@ -499,9 +499,36 @@ try {
   await page.locator('input[type="range"]').nth(3).fill('0')
   console.log('  ok  tilt and corner sliders restyle the slides')
 
-  // mesh: a photo flows across the seam between adjacent slides
+  // mesh, per seam: every seam shows a link chip; tapping one meshes just it
+  await closeOptions()
+  await page.locator('.slide-canvas').first().scrollIntoViewIfNeeded()
+  await page.waitForTimeout(200)
+  const seamChips = await page.locator('.mesh-link').count()
+  assert.ok(seamChips >= 4, `every seam should carry a link chip (got ${seamChips})`)
+  assert.equal(await page.locator('.mesh-link-on').count(), 0, 'all seams should start open')
+  const soloBefore = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  await page.locator('.mesh-link').first().click()
+  await page.waitForTimeout(900)
+  assert.equal(await page.locator('.mesh-link-on').count(), 1, 'tapping a chip should mesh exactly that seam')
+  assert.equal(
+    await page.locator('.slide-card.mesh-join-right').count(),
+    1,
+    'only the tapped seam should join',
+  )
+  assert.notEqual(
+    await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL()),
+    soloBefore,
+    'meshing one seam did not change the render',
+  )
+  await page.locator('.mesh-link').first().click()
+  await page.waitForTimeout(400)
+  assert.equal(await page.locator('.mesh-link-on').count(), 0, 'tapping again should unmesh the seam')
+  console.log('  ok  seam chips mesh and unmesh individual slide pairs')
+
+  // mesh all: a photo flows across every seam
+  await openOptions()
   const meshBefore = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
-  await page.locator('[aria-label="Mesh slides"]').getByRole('button', { name: 'On' }).click()
+  await page.locator('[aria-label="Mesh slides"]').getByRole('button', { name: 'All' }).click()
   await page.waitForTimeout(900)
   const meshOn = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
   assert.notEqual(meshBefore, meshOn, 'mesh did not change the render')
@@ -543,7 +570,8 @@ try {
   const c1 = await page.locator('.slide-canvas').first().boundingBox()
   const c2 = await page.locator('.slide-canvas').nth(2).boundingBox() // a slide that cannot own the seam-0 bridge
   assert.ok(c1.x >= 0 && c2.x + c2.width <= page.viewportSize().width, 'drag endpoints must be on screen')
-  await page.mouse.move(c1.x + c1.width - 12, c1.y + c1.height / 2) // inside the right seam strip
+  // grab the seam strip above the vertical centre — the seam chip sits at 50%
+  await page.mouse.move(c1.x + c1.width - 12, c1.y + c1.height * 0.28)
   await page.mouse.down()
   await page.mouse.move(c2.x + c2.width / 2, c2.y + c2.height / 2, { steps: 14 })
   await page.mouse.up()
@@ -557,8 +585,26 @@ try {
   assert.notDeepEqual(afterBridgeDrag, beforeBridgeDrag, 'bridge photo could not be moved while meshed')
   console.log('  ok  meshed slides show the join and the bridge photo stays draggable')
   await openOptions()
-  await page.locator('[aria-label="Mesh slides"]').getByRole('button', { name: 'Off' }).click()
+  await page.locator('[aria-label="Mesh slides"]').getByRole('button', { name: 'None' }).click()
   await closeOptions()
+
+  // tap-to-resize: a clean tap on a photo opens a size slider; pushing it up
+  // visibly regrows that photo's slot
+  const rc = await page.locator('.slide-canvas').first().boundingBox()
+  const preResize = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  await page.mouse.click(rc.x + rc.width * 0.25, rc.y + rc.height * 0.25)
+  await page.waitForTimeout(400)
+  assert.equal(await page.locator('.size-popover').count(), 1, 'tap should open the size popover')
+  await page.locator('.size-popover input[type="range"]').fill('200')
+  await page.waitForTimeout(900)
+  const postResize = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  assert.notEqual(postResize, preResize, 'size slider did not change the layout')
+  await page.locator('.size-popover').getByRole('button', { name: 'Reset' }).click()
+  await page.waitForTimeout(600)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  assert.equal(await page.locator('.size-popover').count(), 0, 'Escape should close the size popover')
+  console.log('  ok  tapping a photo opens a size slider; the slot resizes live')
 
   // phone width: the stats chip must sit clear of the dock, not under it
   await page.setViewportSize({ width: 390, height: 844 })

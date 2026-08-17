@@ -510,6 +510,24 @@ test('cropLoss math', () => {
   assert.ok(Math.abs(cropLoss(0.5, 1) - 0.5) < 1e-9)
 })
 
+test('a size weight pulls a photo toward a matching share of the canvas', () => {
+  const aspects = [1, 1, 1, 1]
+  const base = { canvasW: 1080, canvasH: 1080, margin: 16, gutter: 8, baseSeed: 42 }
+  const even = computeLayout(aspects, base)
+  const boosted = computeLayout(aspects, { ...base, weights: [2, 1, 1, 1] })
+  const area = (r) => r.w * r.h
+  const evenShare = area(even.rects[0]) / even.rects.reduce((a, r) => a + area(r), 0)
+  const boostedShare = area(boosted.rects[0]) / boosted.rects.reduce((a, r) => a + area(r), 0)
+  assert.ok(
+    boostedShare > evenShare + 0.05,
+    `boost did not grow the photo (${evenShare.toFixed(2)} → ${boostedShare.toFixed(2)})`,
+  )
+  assert.ok(boosted.maxLoss <= MAX_CROP_LOSS + 0.05, `boost broke the crop guard (${boosted.maxLoss})`)
+  // weights: null must reproduce the unweighted layout exactly
+  const nullWeights = computeLayout(aspects, { ...base, weights: null })
+  assert.deepEqual(nullWeights.rects, even.rects)
+})
+
 // ---------- remix lenses ----------
 
 const remixDump = (n = 40) => {

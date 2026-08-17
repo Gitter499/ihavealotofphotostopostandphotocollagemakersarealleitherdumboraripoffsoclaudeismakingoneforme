@@ -27,6 +27,7 @@ import {
   MinusIcon,
   TrashIcon,
   LinkSimpleIcon,
+  LinkBreakIcon,
 } from '@phosphor-icons/react'
 
 const BG_SWATCHES = [
@@ -50,7 +51,9 @@ export default function App() {
   const [look, setLook] = useState('auto')
   const [tilt, setTilt] = useState(0) // degrees of per-photo lean
   const [cornerRadius, setCornerRadius] = useState(0)
-  const [mesh, setMesh] = useState(false) // bridge photos across slide seams
+  const [meshSeams, setMeshSeams] = useState(() => new Set()) // seam keys "aKey|bKey" bridged by a photo
+  const [sizeBoosts, setSizeBoosts] = useState(() => new Map()) // photoId → area weight (1 = neutral)
+  const [sizeEdit, setSizeEdit] = useState(null) // {photoId, x, y} — tap-to-resize popover
   const [aspect, setAspect] = useState('4:5')
   const [importState, setImportState] = useState(null) // {done, total}
   const [skipped, setSkipped] = useState([])
@@ -109,14 +112,29 @@ export default function App() {
     [perSlide, recompose],
   )
 
-  // Esc closes the options popover.
+  // Esc closes the options popover and the size slider.
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape') setOptionsOpen(false)
+      if (e.key === 'Escape') {
+        setOptionsOpen(false)
+        setSizeEdit(null)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  // The size popover follows the same non-modal rule as the toolbox: touching
+  // anything else dismisses it (the touch still lands where it was aimed).
+  useEffect(() => {
+    if (!sizeEdit) return
+    const onDown = (e) => {
+      if (e.target.closest?.('.size-popover')) return
+      setSizeEdit(null)
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => document.removeEventListener('pointerdown', onDown, true)
+  }, [sizeEdit])
 
   // The popover is non-modal: touching anything outside it — a slide, a
   // photo drag, the canvas — hides the toolbox, and the touch still lands
@@ -155,15 +173,19 @@ export default function App() {
 
   const BRIDGE_STRIP = 300 // width (in 1080-space) each slide gives to a seam photo
 
+  const seamKey = (i) => (slides[i + 1] ? `${slides[i].key}|${slides[i + 1].key}` : null)
+
   const layouts = useMemo(() => {
-    // Mesh planning: for each seam between adjacent filled slides, pick a
-    // boundary photo (the more portrait of the pair's tail/head) to span it.
+    // Mesh planning: each seam is its own switch. For every meshed seam
+    // between adjacent filled slides, pick a boundary photo (the more
+    // portrait of the pair's tail/head) to span it.
     const bridgeAfter = new Array(slides.length).fill(null) // seam i → {id, owner}
-    if (mesh) {
+    if (meshSeams.size) {
       const used = new Set()
       for (let i = 0; i < slides.length - 1; i++) {
         const a = slides[i]
         const b = slides[i + 1]
+        if (!meshSeams.has(`${a.key}|${b.key}`)) continue
         if (a.photoIds.length === 0 || b.photoIds.length === 0) continue
         const tail = a.photoIds[a.photoIds.length - 1]
         const head = b.photoIds[0]
@@ -188,6 +210,10 @@ export default function App() {
       )
       const innerIds = s.photoIds.filter((id) => !ownedBridgeIds.has(id))
       const eff = effectiveQualities(innerIds, (id) => photos.get(id))
+      // tap-to-resize: a boosted photo pulls a matching share of the canvas,
+      // and its boosted "quality" steers the bigger slot its way too
+      const boosts = innerIds.map((id) => sizeBoosts.get(id) ?? 1)
+      const anyBoost = boosts.some((b) => b !== 1)
       const inner = computeLayout(
         innerIds.map((id) => photos.get(id)?.aspect ?? 1),
         {
@@ -196,7 +222,8 @@ export default function App() {
           margin,
           gutter,
           baseSeed: s.seed,
-          qualities: innerIds.map((id) => eff.get(id) ?? 0.5),
+          qualities: innerIds.map((id, j) => (eff.get(id) ?? 0.5) * boosts[j]),
+          weights: anyBoost ? boosts : null,
         },
       )
       const rectById = new Map(
@@ -225,7 +252,28 @@ export default function App() {
         bridges.push({ id: rightBridge.id, rect: { x: canvasW - rightStrip, y: 0, w: rightStrip, h: canvasH }, half: 'left' })
       return { ...inner, rects, bridges }
     })
-  }, [slides, photos, canvasW, canvasH, margin, gutter, mesh])
+  }, [slides, photos, canvasW, canvasH, margin, gutter, meshSeams, sizeBoosts])
+
+  const toggleSeam = (i) => {
+    const key = seamKey(i)
+    if (!key) return
+    setMeshSeams((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+  const meshAll = () => {
+    setMeshSeams(() => {
+      const next = new Set()
+      for (let i = 0; i < slides.length - 1; i++) {
+        if (slides[i].photoIds.length && slides[i + 1].photoIds.length) next.add(`${slides[i].key}|${slides[i + 1].key}`)
+      }
+      return next
+    })
+  }
+  const meshNone = () => setMeshSeams(new Set())
 
   const layoutsRef = useRef(layouts)
   layoutsRef.current = layouts
@@ -451,6 +499,7 @@ export default function App() {
     const activate = (x, y) => {
       active = true
       document.body.dataset.dragging = '1'
+      setSizeEdit(null)
       setDrag({ photoId, fromKey: slideKey, x, y, overKey: null })
     }
     if (isTouch) holdTimer = setTimeout(() => activate(start.x, start.y), 320)
@@ -472,6 +521,13 @@ export default function App() {
       setDrag((d) => (d ? { ...d, x: ev.clientX, y: ev.clientY, overKey } : d))
     }
     const onUp = (ev) => {
+      if (!active) {
+        // a clean tap (no drag) selects the photo for resizing — but not on
+        // shelf thumbs, and not on a seam bridge (its strip has a fixed width)
+        const fromTray = trayRef.current.includes(photoId)
+        const isBridge = layoutsRef.current.some((l) => l.bridges?.some((b) => b.id === photoId))
+        if (!fromTray && !isBridge) setSizeEdit({ photoId, x: ev.clientX, y: ev.clientY })
+      }
       if (active) {
         const el = document.elementFromPoint(ev.clientX, ev.clientY)
         const card = el?.closest?.('[data-slide-key]')
@@ -790,14 +846,28 @@ export default function App() {
                     imagesOverride={lookImages}
                     tilt={tilt}
                     radius={cornerRadius}
-                    animKey={`${slide.key}:${slide.seed}:${slide.photoIds.join(',')}:${aspect}:${gutter}:${(slide.swaps ?? []).length}`}
+                    animKey={`${slide.key}:${slide.seed}:${slide.photoIds.join(',')}:${aspect}:${gutter}:${(slide.swaps ?? []).length}:${slide.photoIds.map((id) => sizeBoosts.get(id) ?? 1).join('_')}`}
                     onPhotoPointerDown={(e, photoId) => startPhotoDrag(e, slide.key, photoId)}
                   />
                 )}
-                {layouts[i]?.bridges?.some((b) => b.rect.x > 0) && (
-                  <span className="mesh-link glass-thick" title="Meshed with the next slide — this photo continues across both">
-                    <LinkSimpleIcon size={13} weight="bold" />
-                  </span>
+                {i < slides.length - 1 && slide.photoIds.length > 0 && slides[i + 1].photoIds.length > 0 && (
+                  <button
+                    className={`mesh-link glass-thick ${meshSeams.has(seamKey(i)) ? 'mesh-link-on' : 'mesh-link-off'}`}
+                    onClick={() => toggleSeam(i)}
+                    aria-pressed={meshSeams.has(seamKey(i))}
+                    aria-label={meshSeams.has(seamKey(i)) ? 'Unmesh these slides' : 'Mesh these slides'}
+                    title={
+                      meshSeams.has(seamKey(i))
+                        ? 'Meshed — a photo continues across both slides. Tap to separate.'
+                        : 'Tap to mesh these slides — a photo will flow across the seam.'
+                    }
+                  >
+                    {meshSeams.has(seamKey(i)) ? (
+                      <LinkSimpleIcon size={14} weight="bold" />
+                    ) : (
+                      <LinkBreakIcon size={14} weight="bold" />
+                    )}
+                  </button>
                 )}
               </div>
             ))}
@@ -917,11 +987,15 @@ export default function App() {
             <div className="control">
               <span className="control-label">Mesh</span>
               <div className="segmented" role="group" aria-label="Mesh slides">
-                <button className={mesh ? '' : 'active'} onClick={() => setMesh(false)}>
-                  Off
+                <button className={meshSeams.size === 0 ? 'active' : ''} onClick={meshNone}>
+                  None
                 </button>
-                <button className={mesh ? 'active' : ''} onClick={() => setMesh(true)} title="Photos flow across slide seams">
-                  On
+                <button
+                  className={meshSeams.size > 0 && meshSeams.size >= Math.max(1, slides.length - 1) ? 'active' : ''}
+                  onClick={meshAll}
+                  title="Photos flow across every slide seam — or tap the link at any single seam"
+                >
+                  All
                 </button>
               </div>
             </div>
@@ -995,6 +1069,54 @@ export default function App() {
       )}
 
       {drag && <DragGhost drag={drag} photo={photos.get(drag.photoId)} />}
+
+      {sizeEdit && (
+        <div
+          className="size-popover glass-thick"
+          role="dialog"
+          aria-label="Photo size"
+          style={{
+            left: Math.max(8, Math.min(sizeEdit.x - 130, window.innerWidth - 268)),
+            top: Math.max(8, Math.min(sizeEdit.y + 16, window.innerHeight - 120)),
+          }}
+        >
+          <span className="control-label">
+            Size <b>×{(sizeBoosts.get(sizeEdit.photoId) ?? 1).toFixed(2)}</b>
+          </span>
+          <div className="size-popover-row">
+            <input
+              type="range"
+              min="50"
+              max="200"
+              step="5"
+              value={Math.round((sizeBoosts.get(sizeEdit.photoId) ?? 1) * 100)}
+              aria-label="Photo size"
+              onChange={(e) => {
+                const v = Number(e.target.value) / 100
+                setSizeBoosts((prev) => {
+                  const next = new Map(prev)
+                  if (v === 1) next.delete(sizeEdit.photoId)
+                  else next.set(sizeEdit.photoId, v)
+                  return next
+                })
+              }}
+            />
+            <button
+              className="chip"
+              disabled={!sizeBoosts.has(sizeEdit.photoId)}
+              onClick={() =>
+                setSizeBoosts((prev) => {
+                  const next = new Map(prev)
+                  next.delete(sizeEdit.photoId)
+                  return next
+                })
+              }
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

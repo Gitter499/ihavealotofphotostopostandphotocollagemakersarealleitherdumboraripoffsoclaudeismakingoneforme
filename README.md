@@ -19,7 +19,8 @@ Everything runs in your browser. Photos never leave your device.
 - Filters with live preview bubbles, and an Off switch when they miss. The strip folds into a dot row when you're not choosing.
 - A Remix button that regroups everything under a different idea each press: colour runs, light arcs, hero shots anchoring slides, lookalikes split apart.
 - Tilt, rounded corners, gutter width, 4:5 or 1:1.
-- Mesh mode: a photo can run across two slides, so the carousel swipes as one continuous strip.
+- Mesh: tap the link chip between two slides and a photo runs across the seam, so the carousel swipes as one continuous strip. Each seam is its own switch; the options can set them all at once.
+- Tap any photo and a slider pops up to resize it — the rest of the slide reflows around it.
 - Drag photos between slides or within one. Add, delete, reorder slides. Set any slide's photo count.
 - A playground shelf under the slides: park photos there while you experiment, drag them back when you're sure. Regroup and remix leave parked photos alone.
 - Exports numbered 1440×1800 JPEGs in a zip, ready to post in order.

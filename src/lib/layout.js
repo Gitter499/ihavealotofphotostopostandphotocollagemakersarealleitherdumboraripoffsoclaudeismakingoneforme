@@ -104,28 +104,33 @@ function buildTree(idxs, rect, rng, aspects) {
 
 // ---- refinement: per-node split position vs real subtree crop loss ----
 
-function subtreeCost(node, rect, aspects, totalArea, n) {
+function subtreeCost(node, rect, aspects, totalArea, n, shares) {
   if (node.leaf) {
     const loss = cropLoss(aspects[node.i], rect.w / rect.h)
     let cost = loss
     if (loss > MAX_CROP_LOSS) cost += (loss - MAX_CROP_LOSS) * 8
-    // area fairness — don't let a photo collapse into a sliver
     const frac = (rect.w * rect.h) / totalArea
-    const floor = 0.55 / n
+    // with user size weights, each photo is pulled toward its area share;
+    // without, only the fairness floor applies (identical to the old cost)
+    const target = shares ? shares[node.i] : 1 / n
+    if (shares) cost += Math.abs(frac - target) * 3 * n
+    const floor = 0.55 * target
     if (frac < floor) cost += (floor - frac) * n * 4
     return cost
   }
   const { ra, rb } = splitRect(rect, node.dir, node.t)
-  return subtreeCost(node.a, ra, aspects, totalArea, n) + subtreeCost(node.b, rb, aspects, totalArea, n)
+  return (
+    subtreeCost(node.a, ra, aspects, totalArea, n, shares) + subtreeCost(node.b, rb, aspects, totalArea, n, shares)
+  )
 }
 
-function refine(node, rect, aspects, totalArea, n) {
+function refine(node, rect, aspects, totalArea, n, shares) {
   if (node.leaf) return
   let bestT = node.t
-  let bestCost = subtreeCost(node, rect, aspects, totalArea, n)
+  let bestCost = subtreeCost(node, rect, aspects, totalArea, n, shares)
   for (let t = 0.1; t <= 0.901; t += 0.02) {
     node.t = t
-    const cost = subtreeCost(node, rect, aspects, totalArea, n)
+    const cost = subtreeCost(node, rect, aspects, totalArea, n, shares)
     if (cost < bestCost - 1e-9) {
       bestCost = cost
       bestT = t
@@ -133,8 +138,8 @@ function refine(node, rect, aspects, totalArea, n) {
   }
   node.t = bestT
   const { ra, rb } = splitRect(rect, node.dir, node.t)
-  refine(node.a, ra, aspects, totalArea, n)
-  refine(node.b, rb, aspects, totalArea, n)
+  refine(node.a, ra, aspects, totalArea, n, shares)
+  refine(node.b, rb, aspects, totalArea, n, shares)
 }
 
 function collectLeaves(node, rect, out) {
@@ -190,9 +195,16 @@ function refineAssignment(rects, aspects, qualities) {
 // Returns { rects, seed, maxLoss, meanLoss } with rects aligned to input order.
 // Tries several seeds; retries are the crop guard — a photo losing more than
 // MAX_CROP_LOSS of its area to the crop penalises that attempt heavily.
-export function computeLayout(aspects, { canvasW, canvasH, margin, gutter, baseSeed, attempts = 12, qualities = null }) {
+export function computeLayout(
+  aspects,
+  { canvasW, canvasH, margin, gutter, baseSeed, attempts = 12, qualities = null, weights = null },
+) {
   const n = aspects.length
   if (n === 0) return { rects: [], seed: baseSeed, maxLoss: 0, meanLoss: 0 }
+  const shares = weights ? (() => {
+    const sum = weights.reduce((a, b) => a + b, 0)
+    return weights.map((w) => w / sum)
+  })() : null
   const workArea = {
     x: margin - gutter / 2,
     y: margin - gutter / 2,
@@ -205,7 +217,7 @@ export function computeLayout(aspects, { canvasW, canvasH, margin, gutter, baseS
     const seed = (baseSeed + a * 0x9e3779b9) >>> 0
     const rng = mulberry32(seed)
     const tree = buildTree(aspects.map((_, i) => i), workArea, rng, aspects)
-    refine(tree, workArea, aspects, totalArea, n)
+    refine(tree, workArea, aspects, totalArea, n, shares)
     const leaves = []
     collectLeaves(tree, workArea, leaves)
     let rects = new Array(n)
