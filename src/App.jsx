@@ -99,6 +99,19 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // The popover is non-modal: touching anything outside it — a slide, a
+  // photo drag, the canvas — hides the toolbox, and the touch still lands
+  // on whatever was touched. The dock and filter strip don't dismiss it.
+  useEffect(() => {
+    if (!optionsOpen) return
+    const onDown = (e) => {
+      if (e.target.closest?.('.options-popover') || e.target.closest?.('.bottom-cluster')) return
+      setOptionsOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => document.removeEventListener('pointerdown', onDown, true)
+  }, [optionsOpen])
+
   // Accept drops anywhere on the page.
   useEffect(() => {
     const onDragOver = (e) => e.preventDefault()
@@ -607,9 +620,7 @@ export default function App() {
       )}
 
       {hasPhotos && optionsOpen && (
-        <>
-          <div className="popover-backdrop" onPointerDown={() => setOptionsOpen(false)} />
-          <div className="options-popover glass-thick" role="dialog" aria-label="Options">
+        <div className="options-popover glass-thick" role="dialog" aria-label="Options">
             <div className="control">
               <span className="control-label">
                 Photos per slide <b>{perSlide === 'auto' ? 'Auto' : perSlide}</b>
@@ -664,8 +675,7 @@ export default function App() {
                 ))}
               </div>
             </div>
-          </div>
-        </>
+        </div>
       )}
 
       {hasPhotos && (

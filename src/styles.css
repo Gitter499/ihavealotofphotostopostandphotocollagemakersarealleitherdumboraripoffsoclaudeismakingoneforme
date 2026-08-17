@@ -740,13 +740,6 @@ input[type='range']::-moz-range-thumb {
 
 /* ---------- options popover (springs up from the dock) ---------- */
 
-.popover-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  background: rgba(0, 0, 0, 0.25);
-}
-
 .options-popover {
   position: fixed;
   bottom: calc(200px + env(safe-area-inset-bottom));
@@ -768,21 +761,12 @@ input[type='range']::-moz-range-thumb {
   .options-popover {
     animation: popover-in 320ms var(--ease-spring);
   }
-  .popover-backdrop {
-    animation: fade-in 200ms var(--ease-out);
-  }
 }
 
 @keyframes popover-in {
   from {
     opacity: 0;
     transform: translateX(-50%) translateY(18px) scale(0.9);
-  }
-}
-
-@keyframes fade-in {
-  from {
-    opacity: 0;
   }
 }
 

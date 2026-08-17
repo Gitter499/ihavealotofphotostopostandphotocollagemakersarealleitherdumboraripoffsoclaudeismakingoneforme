@@ -256,6 +256,22 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
   await closeOptions()
 
+  // the popover is non-modal: touching a slide hides it AND the touch lands
+  await openOptions()
+  const countsBeforePassthrough = await page.evaluate(() =>
+    [...document.querySelectorAll('.slide-count')].map((el) => parseInt(el.textContent, 10)),
+  )
+  await page.locator('[aria-label="Fewer photos on this slide"]').first().click()
+  await page.waitForTimeout(300)
+  assert.equal(await page.locator('.options-popover').count(), 0, 'popover should hide when a slide is touched')
+  const countsAfterPassthrough = await page.evaluate(() =>
+    [...document.querySelectorAll('.slide-count')].map((el) => parseInt(el.textContent, 10)),
+  )
+  assert.equal(countsAfterPassthrough[0], countsBeforePassthrough[0] - 1, 'the touch that hid the popover must still land')
+  await page.locator('[aria-label="More photos on this slide"]').first().click()
+  await page.waitForTimeout(300)
+  console.log('  ok  popover hides on slide interaction, click passes through')
+
   // per-slide stepper: minus hands a photo to the next slide, totals conserved
   const countsOf = () =>
     page.evaluate(() => [...document.querySelectorAll('.slide-count')].map((el) => parseInt(el.textContent, 10)))
