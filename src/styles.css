@@ -1002,7 +1002,7 @@ input[type='range']::-moz-range-thumb {
 }
 
 /* Meshed neighbours fuse into one card: the gap, facing padding and facing
-   borders all collapse so the bridge photo runs unbroken across the seam.
+   borders all collapse so the composition runs unbroken across the seam.
    A grey dotted rule marks where Instagram will cut the carousel. */
 .slide-card.mesh-join-right {
   border-top-right-radius: 0;

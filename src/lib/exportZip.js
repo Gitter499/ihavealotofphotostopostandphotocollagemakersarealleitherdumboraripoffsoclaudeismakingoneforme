@@ -42,10 +42,12 @@ export async function renderSlideBlob(
 ) {
   const images = new Map()
   const focals = new Map()
-  const rects = layout.rects
-  const bridges = layout.bridges ?? []
+  // merged groups supply drawIds/drawRects: every group cell near this
+  // slide's window, already in local coordinates
+  const drawIds = layout.drawIds ?? slide.photoIds
+  const rects = layout.drawRects ?? layout.rects
   try {
-    const neededIds = [...new Set([...slide.photoIds, ...bridges.map((b) => b.id)])]
+    const neededIds = [...new Set(drawIds)]
     await Promise.all(
       neededIds.map(async (id) => {
         const photo = photosById.get(id)
@@ -58,7 +60,7 @@ export async function renderSlideBlob(
     const ctx = canvas.getContext('2d')
     ctx.imageSmoothingQuality = 'high'
     ctx.scale(EXPORT_SCALE, EXPORT_SCALE)
-    drawSlide(ctx, { width, height, bg, photoIds: slide.photoIds, rects, images, tilt, radius, bridges, focals, border, caption })
+    drawSlide(ctx, { width, height, bg, photoIds: drawIds, rects, images, tilt, radius, focals, border, caption })
     return format === 'png'
       ? await canvas.convertToBlob({ type: 'image/png' })
       : await canvas.convertToBlob({ type: 'image/jpeg', quality: EXPORT_QUALITY })

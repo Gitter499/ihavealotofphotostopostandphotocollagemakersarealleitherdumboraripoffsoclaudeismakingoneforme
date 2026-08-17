@@ -621,7 +621,7 @@ try {
   assert.equal(await page.locator('.mesh-link-on').count(), 0, 'tapping again should unmesh the seam')
   console.log('  ok  seam chips mesh and unmesh individual slide pairs')
 
-  // mesh all: a photo flows across every seam
+  // mesh all: every slide lays out as one continuous canvas
   await openOptions()
   const meshBefore = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
   await page.locator('[aria-label="Mesh slides"]').getByRole('button', { name: 'All' }).click()
@@ -649,10 +649,10 @@ try {
     return a.map((v, i) => Math.abs(v - b[i]))
   })
   assert.ok(Math.max(...seamDiff) < 30, `seam edges do not continue: ${seamDiff}`)
-  console.log('  ok  mesh flows a photo across the slide seam (edge colours continue)')
+  console.log('  ok  merged slides compose one canvas across the cut (edge colours continue)')
 
-  // meshed neighbours are visibly joined, and photos stay movable —
-  // including the bridge itself, dragged out of its seam strip
+  // merged neighbours are visibly joined, and photos stay movable — even
+  // one grabbed right at the cut, dragged to a slide outside the reach point
   assert.ok((await page.locator('.slide-card.mesh-join-right').count()) >= 1, 'no mesh join indication')
   assert.ok((await page.locator('.mesh-link').count()) >= 1, 'no seam link chip')
   await closeOptions()
@@ -664,22 +664,28 @@ try {
   await page.locator('.slide-canvas').first().scrollIntoViewIfNeeded()
   await page.waitForTimeout(200)
   const c1 = await page.locator('.slide-canvas').first().boundingBox()
-  const c2 = await page.locator('.slide-canvas').nth(2).boundingBox() // a slide that cannot own the seam-0 bridge
+  const c2 = await page.locator('.slide-canvas').nth(2).boundingBox()
   assert.ok(c1.x >= 0 && c2.x + c2.width <= page.viewportSize().width, 'drag endpoints must be on screen')
-  // grab the seam strip above the vertical centre — the seam chip sits at 50%
-  await page.mouse.move(c1.x + c1.width - 12, c1.y + c1.height * 0.28)
-  await page.mouse.down()
-  await page.mouse.move(c2.x + c2.width / 2, c2.y + c2.height / 2, { steps: 14 })
-  await page.mouse.up()
-  await page.waitForTimeout(600)
-  const afterBridgeDrag = await meshCounts()
+  // grab near the cut, off the vertical centre (the seam chip sits at 50%);
+  // the cut can fall inside a gutter, so probe a few heights until a photo
+  // actually moves
+  let afterBridgeDrag = beforeBridgeDrag
+  for (const fy of [0.28, 0.72, 0.15]) {
+    await page.mouse.move(c1.x + c1.width - 12, c1.y + c1.height * fy)
+    await page.mouse.down()
+    await page.mouse.move(c2.x + c2.width / 2, c2.y + c2.height / 2, { steps: 14 })
+    await page.mouse.up()
+    await page.waitForTimeout(600)
+    afterBridgeDrag = await meshCounts()
+    if (JSON.stringify(afterBridgeDrag) !== JSON.stringify(beforeBridgeDrag)) break
+  }
   assert.equal(
     afterBridgeDrag.reduce((a, b) => a + b, 0),
     beforeBridgeDrag.reduce((a, b) => a + b, 0),
-    'bridge drag dropped a photo',
+    'cut-side drag dropped a photo',
   )
-  assert.notDeepEqual(afterBridgeDrag, beforeBridgeDrag, 'bridge photo could not be moved while meshed')
-  console.log('  ok  meshed slides show the join and the bridge photo stays draggable')
+  assert.notDeepEqual(afterBridgeDrag, beforeBridgeDrag, 'photo at the cut could not be moved while merged')
+  console.log('  ok  merged slides show the join and photos at the cut stay draggable')
   await openOptions()
   await page.locator('[aria-label="Mesh slides"]').getByRole('button', { name: 'None' }).click()
   await closeOptions()

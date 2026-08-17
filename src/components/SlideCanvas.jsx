@@ -10,6 +10,10 @@ const MORPH_MS = 420
 //    (shuffle, gutter, aspect changes) — FLIP on canvas
 //  - static: plain redraw (filter/background changes)
 // All motion collapses to a static draw under prefers-reduced-motion.
+//
+// In a merged group the layout supplies drawIds/drawRects: every group cell
+// near this slide's window, in local coordinates. Cells crossing the cut
+// clip at the canvas edge and continue on the neighbouring slide.
 export default function SlideCanvas({
   slide,
   layout,
@@ -29,6 +33,9 @@ export default function SlideCanvas({
   const lastAnimKey = useRef(null)
   const shownRects = useRef(null) // Map id → rect currently on screen
 
+  const ids = layout.drawIds ?? slide.photoIds
+  const rects = layout.drawRects ?? layout.rects
+
   useEffect(() => {
     const canvas = ref.current
     const scale = BACKING_W / canvasW
@@ -39,33 +46,31 @@ export default function SlideCanvas({
     const ctx = canvas.getContext('2d')
     const images = new Map()
     const focals = new Map()
-    const neededIds = [...slide.photoIds, ...(layout.bridges ?? []).map((b) => b.id)]
-    for (const id of neededIds) {
+    for (const id of ids) {
       const p = photos.get(id)
       const bmp = imagesOverride?.get(id) ?? p?.previewBitmap
       if (bmp) images.set(id, bmp)
       if (p?.focal) focals.set(id, p.focal)
     }
-    const draw = (rects, progressOf) => {
+    const draw = (frameRects, progressOf) => {
       ctx.setTransform(scale, 0, 0, scale, 0, 0)
       drawSlide(ctx, {
         width: canvasW,
         height: canvasH,
         bg,
-        photoIds: slide.photoIds,
-        rects,
+        photoIds: ids,
+        rects: frameRects,
         images,
         progressOf,
         tilt,
         radius,
-        bridges: layout.bridges ?? [],
         focals,
         border,
         caption,
       })
       // remember what is actually on screen so an interrupted morph
       // continues from where it is instead of jumping
-      shownRects.current = new Map(slide.photoIds.map((id, i) => [id, rects[i]]).filter(([, r]) => r))
+      shownRects.current = new Map(ids.map((id, i) => [id, frameRects[i]]).filter(([, r]) => r))
     }
 
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -73,23 +78,27 @@ export default function SlideCanvas({
     lastAnimKey.current = animKey
 
     const prev = shownRects.current
-    const morphIds = slide.photoIds.filter((_, i) => layout.rects[i])
-    const canMorph = prev && morphIds.length > 0 && morphIds.every((id) => prev.has(id))
+    const morphIds = ids.filter((_, i) => rects[i])
+    // FLIP for every cell that was already on screen; cells arriving from a
+    // neighbour (mesh toggled, photo moved) fade in alongside the glide
+    const canMorph = prev && morphIds.length > 0 && morphIds.some((id) => prev.has(id))
     let raf
 
     if (reduced || !keyChanged) {
-      draw(layout.rects)
+      draw(rects)
       return
     }
 
     if (canMorph) {
-      // FLIP: interpolate every photo from where it was to where it belongs
-      const from = slide.photoIds.map((id) => prev.get(id) ?? null)
+      const from = ids.map((id) => prev.get(id) ?? null)
       const t0 = performance.now()
       const tick = (t) => {
         const raw = Math.min(1, (t - t0) / MORPH_MS)
         const e = easeOut(raw)
-        draw(slide.photoIds.map((_, i) => (from[i] && layout.rects[i] ? lerpRect(from[i], layout.rects[i], e) : layout.rects[i])))
+        draw(
+          ids.map((_, i) => (from[i] && rects[i] ? lerpRect(from[i], rects[i], e) : rects[i])),
+          (i) => (from[i] ? 1 : e),
+        )
         if (raw < 1) raf = requestAnimationFrame(tick)
       }
       raf = requestAnimationFrame(tick)
@@ -97,11 +106,11 @@ export default function SlideCanvas({
     }
 
     // entrance: staggered settle
-    const { totalMs, progressAt } = makeStagger(slide.photoIds.length)
+    const { totalMs, progressAt } = makeStagger(ids.length)
     const t0 = performance.now()
     const tick = (t) => {
       const elapsed = t - t0
-      draw(layout.rects, (i) => progressAt(elapsed, i))
+      draw(rects, (i) => progressAt(elapsed, i))
       if (elapsed < totalMs) raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
@@ -113,19 +122,11 @@ export default function SlideCanvas({
     const box = ref.current.getBoundingClientRect()
     const x = ((e.clientX - box.left) / box.width) * canvasW
     const y = ((e.clientY - box.top) / box.height) * canvasH
-    // reverse order: scatter-template cells overlap, and the last drawn is on top
-    for (let i = layout.rects.length - 1; i >= 0; i--) {
-      const r = layout.rects[i]
+    // reverse order: overlapping cells draw last-on-top
+    for (let i = rects.length - 1; i >= 0; i--) {
+      const r = rects[i]
       if (r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
-        onPhotoPointerDown(e, slide.photoIds[i])
-        return
-      }
-    }
-    // seam strips are photos too — the bridge stays draggable under mesh
-    for (const b of layout.bridges ?? []) {
-      const r = b.rect
-      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
-        onPhotoPointerDown(e, b.id)
+        onPhotoPointerDown(e, ids[i])
         return
       }
     }

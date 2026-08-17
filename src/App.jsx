@@ -94,7 +94,7 @@ export default function App() {
   const [look, setLook] = useState('auto')
   const [tilt, setTilt] = useState(0) // degrees of per-photo lean
   const [cornerRadius, setCornerRadius] = useState(0)
-  const [meshSeams, setMeshSeams] = useState(() => new Set()) // seam keys "aKey|bKey" bridged by a photo
+  const [meshSeams, setMeshSeams] = useState(() => new Set()) // seam keys "aKey|bKey" merged into one canvas
   const [sizeBoosts, setSizeBoosts] = useState(() => new Map()) // photoId → area weight (1 = neutral)
   const [sizeEdit, setSizeEdit] = useState(null) // {photoId, x, y} — tap-to-resize popover
   const [slideTemplates, setSlideTemplates] = useState(() => new Map()) // slideKey → template id ('' = auto)
@@ -437,101 +437,108 @@ export default function App() {
     if (photos.size) recompose(photos, per)
   }
 
-  const BRIDGE_STRIP = 300 // width (in 1080-space) each slide gives to a seam photo
-
   const seamKey = (i) => (slides[i + 1] ? `${slides[i].key}|${slides[i + 1].key}` : null)
+
+  // Meshed seams chain adjacent filled slides into groups. A group is laid
+  // out as ONE wide canvas (n × canvasW): the composition simply continues
+  // across the cut, and each slide shows its own window of it.
+  const meshGroups = useMemo(() => {
+    const groups = [] // { start, end } inclusive slide indices
+    let i = 0
+    while (i < slides.length) {
+      let end = i
+      while (
+        end < slides.length - 1 &&
+        slides[end].photoIds.length > 0 &&
+        slides[end + 1].photoIds.length > 0 &&
+        meshSeams.has(`${slides[end].key}|${slides[end + 1].key}`)
+      )
+        end++
+      groups.push({ start: i, end })
+      i = end + 1
+    }
+    return groups
+  }, [slides, meshSeams])
 
   const layoutCache = useRef(new Map())
   const layouts = useMemo(() => {
     const nextCache = new Map()
-    // Mesh planning: each seam is its own switch. For every meshed seam
-    // between adjacent filled slides, pick a boundary photo (the more
-    // portrait of the pair's tail/head) to span it.
-    const bridgeAfter = new Array(slides.length).fill(null) // seam i → {id, owner}
-    if (meshSeams.size) {
-      const used = new Set()
-      for (let i = 0; i < slides.length - 1; i++) {
-        const a = slides[i]
-        const b = slides[i + 1]
-        if (!meshSeams.has(`${a.key}|${b.key}`)) continue
-        if (a.photoIds.length === 0 || b.photoIds.length === 0) continue
-        const tail = a.photoIds[a.photoIds.length - 1]
-        const head = b.photoIds[0]
-        const candidates = [
-          { id: tail, owner: i },
-          { id: head, owner: i + 1 },
-        ].filter((c) => !used.has(c.id))
-        if (candidates.length === 0) continue
-        candidates.sort((x, y) => (photos.get(x.id)?.aspect ?? 1) - (photos.get(y.id)?.aspect ?? 1))
-        bridgeAfter[i] = candidates[0]
-        used.add(candidates[0].id)
-      }
-    }
-
-    const result = slides.map((s, i) => {
-      const leftBridge = i > 0 ? bridgeAfter[i - 1] : null
-      const rightBridge = bridgeAfter[i]
-      const leftStrip = leftBridge ? BRIDGE_STRIP : 0
-      const rightStrip = rightBridge ? BRIDGE_STRIP : 0
-      const ownedBridgeIds = new Set(
-        [leftBridge, rightBridge].filter((b) => b && b.owner === i).map((b) => b.id),
-      )
-      const innerIds = s.photoIds.filter((id) => !ownedBridgeIds.has(id))
-      const eff = effectiveQualities(innerIds, (id) => photos.get(id))
+    const result = new Array(slides.length)
+    for (const g of meshGroups) {
+      const members = slides.slice(g.start, g.end + 1)
+      const n = members.length
+      const groupW = n * canvasW
+      const allIds = members.flatMap((s) => s.photoIds)
+      const eff = effectiveQualities(allIds, (id) => photos.get(id))
       // tap-to-resize: a boosted photo pulls a matching share of the canvas
-      const boosts = innerIds.map((id) => sizeBoosts.get(id) ?? 1)
-      const quals = innerIds.map((id) => eff.get(id) ?? 0.5)
-      const innerW = canvasW - leftStrip - rightStrip
-      // a pinned template wins over the BSP engine while its count matches
-      const tpl = templateById(slideTemplates.get(s.key))
-      const usingTpl = tpl && tpl.count === innerIds.length
+      const boosts = allIds.map((id) => sizeBoosts.get(id) ?? 1)
+      const quals = allIds.map((id) => eff.get(id) ?? 0.5)
+      // a pinned template wins over the BSP engine on a solo slide — merged
+      // groups always compose freely across the full width
+      const tpl = n === 1 ? templateById(slideTemplates.get(members[0].key)) : null
+      const usingTpl = tpl && tpl.count === allIds.length
+      const seed = members.reduce((a, s) => (Math.imul(a, 31) + s.seed) >>> 0, 17)
       const opts = {
-        canvasW: innerW,
+        canvasW: groupW,
         canvasH,
         margin,
         gutter,
-        baseSeed: s.seed,
+        baseSeed: seed,
         qualities: quals,
         weights: boosts.some((b) => b !== 1) ? boosts : null,
       }
-      // per-slide cache: dragging one photo's size slider only relays out
-      // the slide that actually changed
-      const cacheKey = JSON.stringify([s.key, innerIds, boosts, quals, innerW, canvasH, margin, gutter, s.seed, usingTpl && tpl.id])
+      // per-group cache: dragging one photo's size slider only relays out
+      // the group that actually changed
+      const cacheKey = JSON.stringify([
+        members.map((s) => s.key), allIds, boosts, quals, groupW, canvasH, margin, gutter, seed, usingTpl && tpl.id,
+      ])
       const inner =
         layoutCache.current.get(cacheKey) ??
         (usingTpl
-          ? { rects: templateRects(tpl, { canvasW: innerW, canvasH, margin, gutter }), seed: s.seed }
-          : computeLayout(innerIds.map((id) => photos.get(id)?.aspect ?? 1), opts))
+          ? { rects: templateRects(tpl, { canvasW: groupW, canvasH, margin, gutter }), seed }
+          : computeLayout(allIds.map((id) => photos.get(id)?.aspect ?? 1), opts))
       nextCache.set(cacheKey, inner)
-      const rectById = new Map(
-        innerIds.map((id, j) => [
-          id,
-          inner.rects[j] ? { ...inner.rects[j], x: inner.rects[j].x + leftStrip } : null,
-        ]),
-      )
-      let rects = s.photoIds.map((id) => rectById.get(id) ?? null)
       // user-dragged reorders: the two photos' rects trade places
-      if (s.swaps?.length) {
-        rects = [...rects]
-        for (const [a, b] of s.swaps) {
-          const ia = s.photoIds.indexOf(a)
-          const ib = s.photoIds.indexOf(b)
-          if (ia >= 0 && ib >= 0 && rects[ia] && rects[ib]) {
-            const t = rects[ia]
-            rects[ia] = rects[ib]
-            rects[ib] = t
+      const groupRects = allIds.map((_, j) => inner.rects[j] ?? null)
+      for (const s of members) {
+        for (const [a, b] of s.swaps ?? []) {
+          const ia = allIds.indexOf(a)
+          const ib = allIds.indexOf(b)
+          if (ia >= 0 && ib >= 0 && groupRects[ia] && groupRects[ib]) {
+            const t = groupRects[ia]
+            groupRects[ia] = groupRects[ib]
+            groupRects[ib] = t
           }
         }
       }
-      const bridges = []
-      if (leftBridge) bridges.push({ id: leftBridge.id, rect: { x: 0, y: 0, w: leftStrip, h: canvasH }, half: 'right' })
-      if (rightBridge)
-        bridges.push({ id: rightBridge.id, rect: { x: canvasW - rightStrip, y: 0, w: rightStrip, h: canvasH }, half: 'left' })
-      return { ...inner, rects, bridges }
-    })
+      members.forEach((s, k) => {
+        const offsetX = k * canvasW
+        // every group cell in this slide's local space — cells crossing the
+        // cut clip at the canvas edge and continue on the neighbour; keep
+        // only cells near this window so huge groups stay cheap to draw
+        const drawIds = []
+        const drawRects = []
+        const slack = canvasW * 0.1 // tilt rotation can poke past a cell
+        allIds.forEach((id, j) => {
+          const r = groupRects[j]
+          if (!r) return
+          const local = { ...r, x: r.x - offsetX }
+          if (local.x + local.w > -slack && local.x < canvasW + slack) {
+            drawIds.push(id)
+            drawRects.push(local)
+          }
+        })
+        const rectByAll = new Map(allIds.map((id, j) => [id, groupRects[j]]))
+        const rects = s.photoIds.map((id) => {
+          const r = rectByAll.get(id)
+          return r ? { ...r, x: r.x - offsetX } : null
+        })
+        result[g.start + k] = { seed: inner.seed, rects, drawIds, drawRects, groupSize: n, groupIndex: k }
+      })
+    }
     layoutCache.current = nextCache
     return result
-  }, [slides, photos, canvasW, canvasH, margin, gutter, meshSeams, sizeBoosts, slideTemplates])
+  }, [slides, photos, canvasW, canvasH, margin, gutter, meshGroups, sizeBoosts, slideTemplates])
 
   const toggleSeam = (i) => {
     const key = seamKey(i)
@@ -619,8 +626,15 @@ export default function App() {
     if (bgMode === 'dark') return slides.map(() => '#0d0d0d')
     if (bgMode === 'light') return slides.map(() => '#f2efe9')
     if (bgMode.startsWith('#')) return slides.map(() => bgMode)
-    return slides.map((s) => averageColor(s.photoIds.map((id) => photos.get(id)?.previewBitmap)))
-  }, [bgMode, slides, photos])
+    // merged slides share one canvas, so they share one background
+    const bgs = new Array(slides.length)
+    for (const g of meshGroups) {
+      const ids = slides.slice(g.start, g.end + 1).flatMap((s) => s.photoIds)
+      const c = averageColor(ids.map((id) => photos.get(id)?.previewBitmap))
+      for (let i = g.start; i <= g.end; i++) bgs[i] = c
+    }
+    return bgs
+  }, [bgMode, slides, photos, meshGroups])
 
   const shuffleSlide = (i) => {
     pushHistory()
@@ -691,22 +705,26 @@ export default function App() {
     )
   }
 
-  // swap the two photos' positions in the slide's order — used when a seam
-  // bridge is involved, since the bridge is chosen from boundary positions.
-  // Dragging a photo onto the bridge (or the bridge onto a photo) hands the
-  // seam over to the other photo.
-  const swapPhotoOrder = (slideKey, idA, idB) => {
+  // in a merged group, dropping a photo onto a cell owned by another member
+  // slide trades the two photos' slots across the slides
+  const swapAcrossSlides = (idA, idB) => {
     pushHistory()
     haptics.select()
     setSlides((prev) =>
       prev.map((s) => {
-        if (s.key !== slideKey) return s
-        const ids = [...s.photoIds]
-        const ia = ids.indexOf(idA)
-        const ib = ids.indexOf(idB)
-        if (ia < 0 || ib < 0) return s
-        ;[ids[ia], ids[ib]] = [ids[ib], ids[ia]]
-        return { ...s, photoIds: ids }
+        let changed = false
+        const ids = s.photoIds.map((id) => {
+          if (id === idA) {
+            changed = true
+            return idB
+          }
+          if (id === idB) {
+            changed = true
+            return idA
+          }
+          return id
+        })
+        return changed ? { ...s, photoIds: ids } : s
       }),
     )
   }
@@ -906,19 +924,17 @@ export default function App() {
     }
     const onUp = (ev) => {
       if (!active) {
-        // a clean tap (no drag) selects the photo for resizing — but not on
-        // shelf thumbs, and not on a seam bridge (its strip has a fixed width)
-        const fromTray = trayRef.current.includes(photoId)
-        const isBridge = layoutsRef.current.some((l) => l.bridges?.some((b) => b.id === photoId))
-        if (!fromTray && !isBridge) setSizeEdit({ photoId, x: ev.clientX, y: ev.clientY })
+        // a clean tap (no drag) selects the photo for resizing — shelf
+        // thumbs stay tap-free
+        if (!trayRef.current.includes(photoId)) setSizeEdit({ photoId, x: ev.clientX, y: ev.clientY })
       }
       if (active) {
         const el = document.elementFromPoint(ev.clientX, ev.clientY)
         const card = el?.closest?.('[data-slide-key]')
         const toKey = card?.dataset.slideKey
         const fromTray = trayRef.current.includes(photoId)
-        // a seam bridge can be drawn on its neighbour's canvas — resolve the
-        // slide that actually owns the photo before deciding move vs swap
+        // in a merged group a photo can be drawn on its neighbour's canvas —
+        // resolve the slide that actually owns it before deciding move vs swap
         const ownerKey = slidesRef.current.find((s) => s.photoIds.includes(photoId))?.key ?? slideKey
         if (el?.closest?.('.playground')) {
           relocatePhoto(photoId, TRAY_KEY)
@@ -935,30 +951,21 @@ export default function App() {
             const x = ((ev.clientX - box.left) / box.width) * canvasW
             const y = ((ev.clientY - box.top) / box.height) * canvasH
             const layout = layoutsRef.current[idx] ?? {}
-            const rects = layout.rects ?? []
-            const bridgeList = layout.bridges ?? []
-            const ids = slidesRef.current[idx].photoIds
+            const ids = layout.drawIds ?? slidesRef.current[idx].photoIds
+            const rects = layout.drawRects ?? layout.rects ?? []
             let targetId = null
-            for (let r = 0; r < rects.length; r++) {
+            // reverse order: overlapping cells draw last-on-top
+            for (let r = rects.length - 1; r >= 0; r--) {
               const rect = rects[r]
               if (rect && x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
                 targetId = ids[r]
                 break
               }
             }
-            if (targetId == null) {
-              for (const b of bridgeList) {
-                const rect = b.rect
-                if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
-                  targetId = b.id
-                  break
-                }
-              }
-            }
             if (targetId != null && targetId !== photoId) {
-              const bridgeInvolved = bridgeList.some((b) => b.id === photoId || b.id === targetId)
-              if (bridgeInvolved) swapPhotoOrder(ownerKey, photoId, targetId)
-              else swapPhotos(ownerKey, photoId, targetId)
+              const targetOwner = slidesRef.current.find((s) => s.photoIds.includes(targetId))?.key
+              if (targetOwner === ownerKey) swapPhotos(ownerKey, photoId, targetId)
+              else if (targetOwner) swapAcrossSlides(photoId, targetId)
             }
           }
         }
@@ -1211,8 +1218,8 @@ export default function App() {
               <div
                 key={slide.key}
                 className={`slide-card glass-thin ${drag?.overKey === slide.key && drag.fromKey !== slide.key ? 'drop-target' : ''} ${
-                  layouts[i]?.bridges?.some((b) => b.rect.x === 0) ? 'mesh-join-left' : ''
-                } ${layouts[i]?.bridges?.some((b) => b.rect.x > 0) ? 'mesh-join-right' : ''} ${
+                  layouts[i]?.groupIndex > 0 ? 'mesh-join-left' : ''
+                } ${layouts[i] && layouts[i].groupIndex < layouts[i].groupSize - 1 ? 'mesh-join-right' : ''} ${
                   hoverSeam === i || hoverSeam === i - 1 ? 'mesh-preview' : ''
                 }`}
                 data-slide-key={slide.key}
@@ -1319,7 +1326,9 @@ export default function App() {
                     radius={cornerRadius}
                     border={borderW > 0 ? { width: borderW, color: borderColor, style: borderStyle } : null}
                     caption={captions.get(slide.key) ?? null}
-                    animKey={`${slide.key}:${slide.seed}:${slide.photoIds.join(',')}:${aspect}:${gutter}:${(slide.swaps ?? []).length}:${slide.photoIds.map((id) => sizeBoosts.get(id) ?? 1).join('_')}:${slideTemplates.get(slide.key) ?? ''}`}
+                    animKey={`${slide.key}:${aspect}:${gutter}:${(layouts[i]?.drawIds ?? []).join('.')}:${(layouts[i]?.drawRects ?? [])
+                      .map((r) => (r ? `${r.x | 0},${r.y | 0},${r.w | 0}` : ''))
+                      .join(';')}`}
                     onPhotoPointerDown={(e, photoId) => startPhotoDrag(e, slide.key, photoId)}
                   />
                 )}
@@ -1344,8 +1353,8 @@ export default function App() {
                         aria-label={meshed ? 'Unmesh these slides' : 'Mesh these slides'}
                         title={
                           meshed
-                            ? 'Meshed — a photo continues across both slides. Tap to separate.'
-                            : 'Tap to mesh these slides — a photo will flow across the seam.'
+                            ? 'Merged — one composition flows across both slides. Tap to separate.'
+                            : 'Tap to merge these slides into one wide canvas.'
                         }
                       >
                         <Icon size={17} weight="bold" />
@@ -1545,7 +1554,7 @@ export default function App() {
                 <button
                   className={meshSeams.size > 0 && meshSeams.size >= Math.max(1, slides.length - 1) ? 'active' : ''}
                   onClick={meshAll}
-                  title="Photos flow across every slide seam — or tap the link at any single seam"
+                  title="Every slide merges into one continuous canvas — or tap the link at any single seam"
                 >
                   All
                 </button>
@@ -1656,7 +1665,7 @@ export default function App() {
             {[
               { Icon: HandTapIcon, text: 'Tap any photo to resize it or slide its crop around.' },
               { Icon: ArrowsOutCardinalIcon, text: 'Drag photos between slides — or park them on the playground shelf below.' },
-              { Icon: LinkSimpleIcon, text: 'Tap the link between two slides and a photo will flow across the seam.' },
+              { Icon: LinkSimpleIcon, text: 'Tap the link between two slides to merge them into one wide canvas.' },
               { Icon: SparkleIcon, text: 'The dots up top are filters. Point at them to preview, tap to apply.' },
             ].map(({ Icon, text }) => (
               <div key={text} className="hint-row">
