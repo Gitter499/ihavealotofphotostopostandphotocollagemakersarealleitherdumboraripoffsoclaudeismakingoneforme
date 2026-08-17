@@ -6,9 +6,9 @@ Everything runs in your browser. Photos never leave your device.
 
 [**Try it here.**](https://gitter499.github.io/ihavealotofphotostopostandphotocollagemakersarealleitherdumboraripoffsoclaudeismakingoneforme/)
 
-![the app](docs/screen-desktop-6fdcbe6f.png)
-![tilt and rounded corners](docs/screen-scrapbook-2dbf4b01.png)
-<img src="docs/screen-mobile-33813199.png" width="300" alt="on a phone"> <img src="docs/screen-sheet-ac74f5d2.png" width="300" alt="the action sheet">
+![the app](docs/screen-desktop-6a66985c.png)
+![tilt and rounded corners](docs/screen-scrapbook-6c9e31ce.png)
+<img src="docs/screen-mobile-29382c56.png" width="300" alt="on a phone"> <img src="docs/screen-sheet-5089e541.png" width="300" alt="the action sheet">
 
 ## What it does
 
