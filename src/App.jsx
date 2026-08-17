@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { importFiles } from './lib/importer.js'
-import { sortPhotos, groupPhotos } from './lib/grouping.js'
+import { sortPhotos, groupPhotos, effectiveQualities } from './lib/grouping.js'
 import { computeLayout } from './lib/layout.js'
-import { averageColor } from './lib/colors.js'
+import { averageColor, ambientFrom } from './lib/colors.js'
 import { exportAllAsZip, renderSlideBlob, slideFileName, saveBlob } from './lib/exportZip.js'
 import { randomSeed } from './lib/rng.js'
 import SlideCanvas from './components/SlideCanvas.jsx'
@@ -102,14 +102,31 @@ export default function App() {
 
   const layouts = useMemo(
     () =>
-      slides.map((s) =>
-        computeLayout(
+      slides.map((s) => {
+        const eff = effectiveQualities(s.photoIds, (id) => photos.get(id))
+        return computeLayout(
           s.photoIds.map((id) => photos.get(id)?.aspect ?? 1),
-          { canvasW, canvasH, margin, gutter, baseSeed: s.seed },
-        ),
-      ),
+          {
+            canvasW,
+            canvasH,
+            margin,
+            gutter,
+            baseSeed: s.seed,
+            qualities: s.photoIds.map((id) => eff.get(id) ?? 0.5),
+          },
+        )
+      }),
     [slides, photos, canvasW, canvasH, margin, gutter],
   )
+
+  // Once photos exist, the ambient field takes its light from them.
+  const ambientColors = useMemo(() => {
+    if (photos.size === 0) return null
+    const list = [...photos.values()]
+    const picks = [list[0], list[Math.floor(list.length / 2)], list[list.length - 1]]
+    const colors = picks.map((p) => ambientFrom(p?.previewBitmap)).filter(Boolean)
+    return colors.length === 3 ? colors : null
+  }, [photos])
 
   const slideBgs = useMemo(() => {
     if (bgMode === 'dark') return slides.map(() => '#0d0d0d')
@@ -234,9 +251,16 @@ export default function App() {
   return (
     <div className="app">
       <div className="ambient" aria-hidden="true">
-        <span />
-        <span />
-        <span />
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            style={
+              ambientColors
+                ? { background: `radial-gradient(circle, ${ambientColors[i]}, transparent 65%)` }
+                : undefined
+            }
+          />
+        ))}
       </div>
       <header className="topbar glass-thick">
         <div className="brand">
@@ -269,7 +293,7 @@ export default function App() {
         <div className="notices">
           {notice?.type === 'raised' && (
             <div className="notice glass-thin">
-              Raised to {notice.per} photos per slide so everything fits in Instagram's 20-slide limit.
+              Raised to {notice.per} photos per slide so everything fits in Instagram’s 20-slide limit.
             </div>
           )}
           {notice?.type === 'overflow' && (
@@ -319,10 +343,7 @@ export default function App() {
                 <span />
               </div>
               <p className="drop-title">Drop your photos.</p>
-              <p className="drop-sub">You'll get carousel slides, ready to post.</p>
-              <p className="drop-hint">
-                Any number of photos · sorted by time · laid out automatically · nothing leaves your browser
-              </p>
+              <p className="drop-sub">You’ll get carousel slides, ready to post.</p>
             </>
           )}
         </div>
@@ -417,7 +438,7 @@ export default function App() {
                       aria-label="Move slide left"
                       title="Move left"
                     >
-                      ◂
+                      <Glyph d="M9.5 3.5 5 8l4.5 4.5" />
                     </button>
                     <button
                       className="icon-btn"
@@ -426,7 +447,7 @@ export default function App() {
                       aria-label="Move slide right"
                       title="Move right"
                     >
-                      ▸
+                      <Glyph d="M6.5 3.5 11 8l-4.5 4.5" />
                     </button>
                     <button
                       className="icon-btn"
@@ -434,7 +455,7 @@ export default function App() {
                       aria-label="Shuffle this slide"
                       title="Shuffle this slide"
                     >
-                      ⤨
+                      <Glyph d="M2 4.5h2.6l6.8 7H14M2 11.5h2.6l1.7-1.75M9.7 6.25l1.7-1.75H14M12 2.5l2 2-2 2M12 9.5l2 2-2 2" />
                     </button>
                     <button
                       className="icon-btn"
@@ -442,7 +463,7 @@ export default function App() {
                       aria-label="Download this slide"
                       title="Download this slide"
                     >
-                      ↓
+                      <Glyph d="M8 2.5v7.5m0 0 3-3m-3 3-3-3M3 13.5h10" />
                     </button>
                   </span>
                 </div>
@@ -459,11 +480,6 @@ export default function App() {
               </div>
             ))}
           </div>
-          <p className="footnote">
-            Drag a photo onto another slide to move it{' '}
-            <span className="footnote-touch">(press and hold on touch)</span> · drag a slide header to reorder ·
-            exports at 1080 × {canvasH === 1080 ? 1080 : 1350}, JPEG 92
-          </p>
         </>
       )}
 
@@ -491,6 +507,25 @@ export default function App() {
 
       {drag && <DragGhost drag={drag} photo={photos.get(drag.photoId)} />}
     </div>
+  )
+}
+
+// One icon voice: 16px grid, 1.8 stroke, round caps — no mixed glyph sets.
+function Glyph({ d }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={d} />
+    </svg>
   )
 }
 

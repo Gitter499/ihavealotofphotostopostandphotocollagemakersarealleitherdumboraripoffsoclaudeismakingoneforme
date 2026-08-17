@@ -31,3 +31,30 @@ export function averageColor(bitmaps) {
   const toHex = (v) => Math.round((v / n) * k).toString(16).padStart(2, '0')
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`
 }
+
+// Ambient light colour drawn from a photo: its average hue, pushed to a
+// saturation and lightness that reads as coloured light rather than mud.
+// This is what the interface glass refracts once photos are loaded.
+export function ambientFrom(bitmap) {
+  if (!bitmap) return null
+  if (!scratch) scratch = document.createElement('canvas')
+  scratch.width = 1
+  scratch.height = 1
+  const ctx = scratch.getContext('2d', { willReadFrequently: true })
+  ctx.drawImage(bitmap, 0, 0, 1, 1)
+  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data
+  const max = Math.max(r, g, b) / 255
+  const min = Math.min(r, g, b) / 255
+  const l = (max + min) / 2
+  let h = 0
+  if (max !== min) {
+    const d = max - min
+    const rn = r / 255
+    const gn = g / 255
+    const bn = b / 255
+    if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6
+    else if (max === gn) h = ((bn - rn) / d + 2) / 6
+    else h = ((rn - gn) / d + 4) / 6
+  }
+  return `hsl(${Math.round(h * 360)} 62% ${Math.round(Math.min(0.62, Math.max(0.45, l)) * 100)}%)`
+}

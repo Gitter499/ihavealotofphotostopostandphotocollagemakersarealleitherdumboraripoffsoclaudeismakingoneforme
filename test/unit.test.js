@@ -1,6 +1,13 @@
 // Unit tests for the pure algorithm modules (run with `npm test`).
 import assert from 'node:assert/strict'
-import { sortPhotos, planSizes, groupPhotos, balanceOrientations } from '../src/lib/grouping.js'
+import {
+  sortPhotos,
+  planSizes,
+  groupPhotos,
+  balanceOrientations,
+  hammingDistance,
+  effectiveQualities,
+} from '../src/lib/grouping.js'
 import { computeLayout, cropLoss, MAX_CROP_LOSS } from '../src/lib/layout.js'
 import { mulberry32 } from '../src/lib/rng.js'
 
@@ -121,9 +128,46 @@ test('groupPhotos returns groups plus excluded tail', () => {
   assert.equal(new Set(flat).size, 160)
 })
 
-// ---------- layout ----------
-
 const LAYOUT_OPTS = { canvasW: 1080, canvasH: 1350, margin: 16, gutter: 8, baseSeed: 12345 }
+
+// ---------- smarter selection ----------
+
+test('hamming distance over [hi, lo] hash pairs', () => {
+  assert.equal(hammingDistance([0, 0], [0, 0]), 0)
+  assert.equal(hammingDistance([0b1011, 0], [0b0010, 0]), 2)
+  assert.equal(hammingDistance([0xffffffff, 0xffffffff], [0, 0]), 64)
+})
+
+test('near-duplicates are demoted to the best of the cluster', () => {
+  const photos = {
+    1: { quality: 0.9, hash: [0xabc0, 0x1230] },
+    2: { quality: 0.6, hash: [0xabc1, 0x1230] }, // 1 bit from photo 1 → duplicate
+    3: { quality: 0.7, hash: [0x0f0f0f0f, 0xf0f0f0f0] }, // distinct
+  }
+  const eff = effectiveQualities([1, 2, 3], (id) => photos[id])
+  assert.equal(eff.get(1), 0.9) // best of cluster keeps its score
+  assert.ok(eff.get(2) < 0.2, `duplicate not demoted: ${eff.get(2)}`)
+  assert.equal(eff.get(3), 0.7) // unrelated photo untouched
+})
+
+test('higher-quality photos get the larger slots when aspects tie', () => {
+  const aspects = [1.5, 1.5, 1.5, 0.75, 0.75, 0.75]
+  const qualities = [0.9, 0.1, 0.5, 0.1, 0.9, 0.5]
+  const { rects } = computeLayout(aspects, { ...LAYOUT_OPTS, qualities })
+  const area = (i) => rects[i].w * rects[i].h
+  // within each same-aspect class, area order must follow quality order
+  assert.ok(area(0) >= area(2) && area(2) >= area(1), `landscape areas ${[area(0), area(2), area(1)]}`)
+  assert.ok(area(4) >= area(5) && area(5) >= area(3), `portrait areas ${[area(4), area(5), area(3)]}`)
+})
+
+test('quality steering never sacrifices crop fit', () => {
+  const aspects = [1.7778, 0.5625, 1.0, 1.33, 0.75]
+  const qualities = [0.1, 0.95, 0.5, 0.4, 0.6]
+  const withQ = computeLayout(aspects, { ...LAYOUT_OPTS, qualities })
+  assert.ok(withQ.maxLoss <= MAX_CROP_LOSS + 0.05, `quality bias broke the crop guard: ${withQ.maxLoss}`)
+})
+
+// ---------- layout ----------
 
 function checkGeometry(aspects, opts = LAYOUT_OPTS) {
   const { rects, maxLoss } = computeLayout(aspects, opts)

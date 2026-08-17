@@ -91,6 +91,8 @@ function runImport(list, { onPhoto, onSkip, onProgress }) {
             height: msg.height,
             aspect: msg.width / msg.height,
             date: msg.date,
+            quality: msg.quality,
+            hash: msg.hash,
           })
           finishOne()
           feed(worker)

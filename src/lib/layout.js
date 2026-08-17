@@ -151,11 +151,46 @@ function inset(rect, d) {
   return { x: rect.x + d, y: rect.y + d, w: rect.w - 2 * d, h: rect.h - 2 * d }
 }
 
+// Quality-aware assignment: hill-climb pairwise swaps of photo↔rect so that,
+// aspect fit permitting, higher-quality photos land in larger slots. Crop
+// loss dominates the utility, so a hero swap never trades away fit.
+function refineAssignment(rects, aspects, qualities) {
+  const n = aspects.length
+  if (!qualities || n < 2) return rects
+  const areas = rects.map((r) => r.w * r.h)
+  const total = areas.reduce((a, b) => a + b, 0)
+  const util = (pi, ri) => {
+    const loss = cropLoss(aspects[pi], rects[ri].w / rects[ri].h)
+    let u = -2.2 * loss + 0.9 * (qualities[pi] ?? 0.5) * (areas[ri] / total) * n
+    if (loss > MAX_CROP_LOSS) u -= 4 * (loss - MAX_CROP_LOSS)
+    return u
+  }
+  const assign = aspects.map((_, i) => i)
+  let improved = true
+  let guard = 0
+  while (improved && guard++ < 40) {
+    improved = false
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const cur = util(i, assign[i]) + util(j, assign[j])
+        const swapped = util(i, assign[j]) + util(j, assign[i])
+        if (swapped > cur + 1e-6) {
+          const t = assign[i]
+          assign[i] = assign[j]
+          assign[j] = t
+          improved = true
+        }
+      }
+    }
+  }
+  return aspects.map((_, i) => rects[assign[i]])
+}
+
 // Lay out `aspects` (one per photo, w/h) on a canvasW × canvasH slide.
 // Returns { rects, seed, maxLoss, meanLoss } with rects aligned to input order.
 // Tries several seeds; retries are the crop guard — a photo losing more than
 // MAX_CROP_LOSS of its area to the crop penalises that attempt heavily.
-export function computeLayout(aspects, { canvasW, canvasH, margin, gutter, baseSeed, attempts = 12 }) {
+export function computeLayout(aspects, { canvasW, canvasH, margin, gutter, baseSeed, attempts = 12, qualities = null }) {
   const n = aspects.length
   if (n === 0) return { rects: [], seed: baseSeed, maxLoss: 0, meanLoss: 0 }
   const workArea = {
@@ -173,13 +208,13 @@ export function computeLayout(aspects, { canvasW, canvasH, margin, gutter, baseS
     refine(tree, workArea, aspects, totalArea, n)
     const leaves = []
     collectLeaves(tree, workArea, leaves)
-    const rects = new Array(n)
+    let rects = new Array(n)
+    for (const { i, rect } of leaves) rects[i] = inset(rect, gutter / 2)
+    rects = refineAssignment(rects, aspects, qualities)
     let maxLoss = 0
     let sum = 0
-    for (const { i, rect } of leaves) {
-      const r = inset(rect, gutter / 2)
-      rects[i] = r
-      const loss = cropLoss(aspects[i], r.w / r.h)
+    for (let i = 0; i < n; i++) {
+      const loss = cropLoss(aspects[i], rects[i].w / rects[i].h)
       if (loss > maxLoss) maxLoss = loss
       sum += loss
     }

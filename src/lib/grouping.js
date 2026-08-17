@@ -96,6 +96,58 @@ export function balanceOrientations(groups, aspectOf) {
   return groups
 }
 
+// ---- smarter selection: near-duplicate detection + quality demotion ----
+
+function popcount(v) {
+  v -= (v >>> 1) & 0x55555555
+  v = (v & 0x33333333) + ((v >>> 2) & 0x33333333)
+  v = (v + (v >>> 4)) & 0x0f0f0f0f
+  return (v * 0x01010101) >>> 24
+}
+
+// Hamming distance between two 64-bit average hashes stored as [hi, lo].
+export function hammingDistance(a, b) {
+  return popcount((a[0] ^ b[0]) >>> 0) + popcount((a[1] ^ b[1]) >>> 0)
+}
+
+export const DUPLICATE_HAMMING = 10
+
+// Effective quality per photo: near-duplicates (burst shots, retakes) are
+// clustered by hash; the best of each cluster keeps its score, the rest are
+// demoted so the layout gives prominence to only one of them.
+export function effectiveQualities(ids, getPhoto) {
+  const eff = new Map()
+  const used = new Array(ids.length).fill(false)
+  for (let i = 0; i < ids.length; i++) {
+    if (used[i]) continue
+    const cluster = [ids[i]]
+    used[i] = true
+    const pi = getPhoto(ids[i])
+    for (let j = i + 1; j < ids.length; j++) {
+      if (used[j]) continue
+      const pj = getPhoto(ids[j])
+      if (pi?.hash && pj?.hash && hammingDistance(pi.hash, pj.hash) <= DUPLICATE_HAMMING) {
+        cluster.push(ids[j])
+        used[j] = true
+      }
+    }
+    let best = cluster[0]
+    let bestQ = -1
+    for (const id of cluster) {
+      const q = getPhoto(id)?.quality ?? 0.5
+      if (q > bestQ) {
+        bestQ = q
+        best = id
+      }
+    }
+    for (const id of cluster) {
+      const q = getPhoto(id)?.quality ?? 0.5
+      eff.set(id, id === best ? q : q * 0.2)
+    }
+  }
+  return eff
+}
+
 // Full grouping pipeline: sorted photo ids → array of id groups + notice.
 export function groupPhotos(sortedIds, aspectOf, perSlide) {
   const { sizes, included, notice } = planSizes(sortedIds.length, perSlide)
