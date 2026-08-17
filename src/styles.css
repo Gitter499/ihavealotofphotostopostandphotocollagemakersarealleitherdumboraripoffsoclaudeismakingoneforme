@@ -738,6 +738,58 @@ input[type='range']::-moz-range-thumb {
   padding: 0 var(--space-1) var(--space-3);
 }
 
+/* ---------- options popover (springs up from the dock) ---------- */
+
+.popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.options-popover {
+  position: fixed;
+  bottom: calc(200px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 70;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+  padding: var(--space-5);
+  border-radius: var(--radius-2xl);
+  width: max-content;
+  max-width: min(92vw, 620px);
+  transform-origin: bottom center;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .options-popover {
+    animation: popover-in 320ms var(--ease-spring);
+  }
+  .popover-backdrop {
+    animation: fade-in 200ms var(--ease-out);
+  }
+}
+
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(18px) scale(0.9);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.dock-btn-active {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 /* ---------- filmstrip ---------- */
 
 .filmstrip {
@@ -863,6 +915,61 @@ input[type='range']::-moz-range-thumb {
   height: auto;
   border-radius: var(--radius-md);
   touch-action: pan-x pan-y;
+}
+
+/* deliberately empty slide, waiting for photos */
+.slide-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  border: 1.5px dashed rgba(255, 255, 255, 0.16);
+  color: var(--label-tertiary);
+  font-size: var(--text-footnote);
+}
+
+/* skeleton card that appends a slide (up to Instagram's 20) */
+.add-slide {
+  appearance: none;
+  flex: 0 0 auto;
+  width: min(180px, 46vw);
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1.5px dashed rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-xl);
+  color: var(--label-tertiary);
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    transform var(--duration-instant) var(--ease-out);
+}
+
+.add-slide:hover {
+  border-color: rgba(10, 132, 255, 0.5);
+  color: var(--label-secondary);
+}
+
+.add-slide:active {
+  transform: scale(0.98);
+}
+
+.add-slide-plus {
+  font-size: 44px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.add-slide-hint {
+  font-size: var(--text-caption1);
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 /* ---------- drag ghost ---------- */

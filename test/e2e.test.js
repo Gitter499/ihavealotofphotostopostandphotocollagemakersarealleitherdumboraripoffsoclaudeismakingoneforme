@@ -161,10 +161,23 @@ try {
   assert.match(await page.locator('.counts').textContent(), /30 photos · \d+ slides/)
   console.log(`  ok  auto grouping → ${autoSlides} slides for 30 photos`)
 
+  // options live in a popover that springs from the dock
+  const openOptions = async () => {
+    if (!(await page.locator('.options-popover').isVisible().catch(() => false)))
+      await page.getByRole('button', { name: 'Options' }).click()
+    await page.locator('.options-popover').waitFor({ state: 'visible' })
+  }
+  const closeOptions = async () => {
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(200)
+  }
+
   // switch to manual 6 per slide for the deterministic assertions below
+  await openOptions()
   await page.locator('input[type="range"]').first().fill('6')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
-  console.log('  ok  manual 6 per slide → 5 slides')
+  await closeOptions()
+  console.log('  ok  manual 6 per slide → 5 slides (via options popover)')
 
   const counts = await page.locator('.counts').textContent()
   assert.match(counts, /30 photos · 5 slides/)
@@ -191,11 +204,13 @@ try {
   console.log('  ok  slide preview actually painted')
 
   // more than 5 slides: lower photos-per-slide → 30 photos at 4 → 8 slides
+  await openOptions()
   await page.locator('input[type="range"]').first().fill('4')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 8, null, { timeout: 10000 })
   console.log('  ok  photos-per-slide 4 regroups 30 photos into 8 slides (>5, cap is 20)')
   await page.locator('input[type="range"]').first().fill('6')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
+  await closeOptions()
 
   // filter bubble strip: Off must actually change the rendered pixels back
   const bubbleCount = await page.locator('.filterbar .bubble').count()
@@ -221,6 +236,7 @@ try {
   console.log('  ok  filter bubbles render (Auto default, Off guard, Noir desaturates)')
 
   // Auto chip returns to dynamic grouping
+  await openOptions()
   await page.locator('button.chip', { hasText: 'Auto' }).click()
   await page.waitForFunction(
     () => /30 photos · \d+ slides/.test(document.querySelector('.counts')?.textContent || ''),
@@ -230,6 +246,7 @@ try {
   console.log('  ok  Auto chip restores dynamic grouping')
   await page.locator('input[type="range"]').first().fill('6')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
+  await closeOptions()
 
   // per-slide stepper: minus hands a photo to the next slide, totals conserved
   const countsOf = () =>
@@ -282,8 +299,22 @@ try {
   assert.deepEqual(lateRequests, [], `network requests after load: ${lateRequests.join(', ')}`)
   console.log('  ok  zero network requests after page load')
 
+  // within-slide reorder: drag one photo onto another in the same slide
+  const cbox = await page.locator('.slide-canvas').first().boundingBox()
+  const preSwap = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  await page.mouse.move(cbox.x + cbox.width * 0.25, cbox.y + cbox.height * 0.18)
+  await page.mouse.down()
+  await page.mouse.move(cbox.x + cbox.width * 0.75, cbox.y + cbox.height * 0.8, { steps: 12 })
+  await page.mouse.up()
+  await page.waitForTimeout(800)
+  const postSwap = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  assert.notEqual(preSwap, postSwap, 'within-slide drag did not reorder photos')
+  console.log('  ok  dragging a photo within a slide swaps positions')
+
   // 1:1 aspect export
+  await openOptions()
   await page.getByRole('button', { name: '1:1' }).click()
+  await closeOptions()
   const [dl2] = await Promise.all([
     page.waitForEvent('download', { timeout: 60000 }),
     page.locator('.slide-card').first().locator('[aria-label="Download this slide"]').click(),
@@ -293,6 +324,17 @@ try {
   const one = jpegSize(readFileSync(onePath))
   assert.deepEqual(one, { height: 1440, width: 1440 })
   console.log('  ok  1:1 aspect exports 1440×1440')
+
+  // add-slide skeleton: appends an empty slide, fillable via its stepper
+  const slidesBefore = await page.locator('.slide-card').count()
+  await page.locator('.add-slide').click()
+  await page.waitForTimeout(250)
+  assert.equal(await page.locator('.slide-card').count(), slidesBefore + 1, 'add-slide did not append')
+  assert.equal(await page.locator('.slide-empty').count(), 1, 'new slide should show the empty state')
+  await page.locator('[aria-label="More photos on this slide"]').last().click()
+  await page.waitForTimeout(400)
+  assert.equal(await page.locator('.slide-empty').count(), 0, 'stepper should pull a photo into the new slide')
+  console.log('  ok  skeleton + card adds a slide; its stepper pulls a photo in')
 
   // 200-photo stress: import must complete and stay responsive
   const many = []

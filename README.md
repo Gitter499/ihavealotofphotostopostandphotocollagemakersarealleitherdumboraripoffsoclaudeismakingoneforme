@@ -55,9 +55,14 @@ page load — zero network requests afterwards.
 ## Controls
 
 Everything has a working default — the app produces a finished result before
-you touch anything. Shuffle (per-slide and all), photos per slide (Auto or
-a fixed 4–8, plus per-slide −/+ steppers that rebalance a boundary photo
-with a neighbouring slide), gutter
+you touch anything. Layout options (photos per slide — Auto or a fixed
+4–8 — gutter, background, aspect) live in a popover that springs from the
+dock's Options button. Per-slide: −/+ steppers rebalance a boundary photo
+with a neighbouring slide, shuffle re-composes, drag a photo within a
+slide to swap two positions, drag it onto another slide to move it, and a
+skeleton + card at the end of the strip adds an empty slide (up to 20) to
+drag photos into. Filters are a bottom strip of live preview bubbles.
+Plus
 width, background (near-black / off-white / sampled from the photos),
 aspect ratio (4:5 or 1:1), drag a slide header to reorder slides, drag a
 photo onto another slide to move it (press-and-hold on touch).

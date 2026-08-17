@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { importFiles } from './lib/importer.js'
-import { sortPhotos, groupPhotos, groupPhotosAuto, effectiveQualities, adjustGroupSize } from './lib/grouping.js'
+import {
+  sortPhotos,
+  groupPhotos,
+  groupPhotosAuto,
+  effectiveQualities,
+  adjustGroupSize,
+  MAX_SLIDES,
+} from './lib/grouping.js'
 import { computeLayout } from './lib/layout.js'
 import { averageColor, ambientFrom } from './lib/colors.js'
 import { LOOKS, filterFor } from './lib/filters.js'
@@ -8,6 +15,7 @@ import { fireConfetti } from './lib/confetti.js'
 import { exportAllAsZip, renderSlideBlob, slideFileName, saveBlob } from './lib/exportZip.js'
 import { randomSeed } from './lib/rng.js'
 import SlideCanvas from './components/SlideCanvas.jsx'
+import Logo from './components/Logo.jsx'
 
 const BG_SWATCHES = [
   { key: 'dark', color: '#0d0d0d', label: 'Near-black' },
@@ -33,6 +41,7 @@ export default function App() {
   const [skipped, setSkipped] = useState([])
   const [notice, setNotice] = useState(null)
   const [exportState, setExportState] = useState(null) // {done, total}
+  const [optionsOpen, setOptionsOpen] = useState(false)
   const [drag, setDrag] = useState(null) // {photoId, fromKey, x, y, overKey}
   const fileInputRef = useRef(null)
   const dragRef = useRef(null)
@@ -81,6 +90,15 @@ export default function App() {
     [perSlide, recompose],
   )
 
+  // Esc closes the options popover.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') setOptionsOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // Accept drops anywhere on the page.
   useEffect(() => {
     const onDragOver = (e) => e.preventDefault()
@@ -107,7 +125,7 @@ export default function App() {
     () =>
       slides.map((s) => {
         const eff = effectiveQualities(s.photoIds, (id) => photos.get(id))
-        return computeLayout(
+        const layout = computeLayout(
           s.photoIds.map((id) => photos.get(id)?.aspect ?? 1),
           {
             canvasW,
@@ -118,9 +136,29 @@ export default function App() {
             qualities: s.photoIds.map((id) => eff.get(id) ?? 0.5),
           },
         )
+        // user-dragged reorders: the two photos' rects trade places
+        if (s.swaps?.length) {
+          const rects = [...layout.rects]
+          for (const [a, b] of s.swaps) {
+            const ia = s.photoIds.indexOf(a)
+            const ib = s.photoIds.indexOf(b)
+            if (ia >= 0 && ib >= 0) {
+              const t = rects[ia]
+              rects[ia] = rects[ib]
+              rects[ib] = t
+            }
+          }
+          return { ...layout, rects }
+        }
+        return layout
       }),
     [slides, photos, canvasW, canvasH, margin, gutter],
   )
+
+  const layoutsRef = useRef(layouts)
+  layoutsRef.current = layouts
+  const slidesRef = useRef(slides)
+  slidesRef.current = slides
 
   const slideFilters = useMemo(
     () => slides.map((s) => s.photoIds.map((id) => filterFor(photos.get(id), look))),
@@ -143,10 +181,23 @@ export default function App() {
   }, [bgMode, slides, photos])
 
   const shuffleSlide = (i) => {
-    setSlides((prev) => prev.map((s, j) => (j === i ? { ...s, seed: randomSeed() } : s)))
+    setSlides((prev) => prev.map((s, j) => (j === i ? { ...s, seed: randomSeed(), swaps: [] } : s)))
   }
   const shuffleAll = () => {
-    setSlides((prev) => prev.map((s) => ({ ...s, seed: randomSeed() })))
+    setSlides((prev) => prev.map((s) => ({ ...s, seed: randomSeed(), swaps: [] })))
+  }
+
+  const addEmptySlide = () => {
+    setSlides((prev) =>
+      prev.length >= MAX_SLIDES ? prev : [...prev, { key: `s${slideKeyCounter++}`, photoIds: [], seed: randomSeed() }],
+    )
+  }
+
+  // reorder two photos within one slide: their rects trade places
+  const swapPhotos = (slideKey, idA, idB) => {
+    setSlides((prev) =>
+      prev.map((s) => (s.key === slideKey ? { ...s, swaps: [...(s.swaps ?? []), [idA, idB]] } : s)),
+    )
   }
 
   // "−"/"+" on a slide: rebalance a boundary photo with a neighbouring slide
@@ -184,7 +235,9 @@ export default function App() {
           if (s.key === toKey) return { ...s, photoIds: [...s.photoIds, photoId], seed: randomSeed() }
           return s
         })
-        .filter((s) => s.photoIds.length > 0)
+        // only the drained source slide folds away — deliberately added empty
+        // slides stay put, waiting for photos
+        .filter((s) => s.photoIds.length > 0 || s.key !== fromKey)
       return next
     })
   }
@@ -224,7 +277,27 @@ export default function App() {
         const el = document.elementFromPoint(ev.clientX, ev.clientY)
         const card = el?.closest?.('[data-slide-key]')
         const toKey = card?.dataset.slideKey
-        if (toKey && toKey !== slideKey) movePhoto(photoId, slideKey, toKey)
+        if (toKey && toKey !== slideKey) {
+          movePhoto(photoId, slideKey, toKey)
+        } else if (toKey === slideKey) {
+          // dropped within the same slide → swap with the photo under the pointer
+          const canvasEl = card.querySelector('.slide-canvas')
+          const idx = slidesRef.current.findIndex((s) => s.key === slideKey)
+          if (canvasEl && idx >= 0) {
+            const box = canvasEl.getBoundingClientRect()
+            const x = ((ev.clientX - box.left) / box.width) * canvasW
+            const y = ((ev.clientY - box.top) / box.height) * canvasH
+            const rects = layoutsRef.current[idx]?.rects ?? []
+            const ids = slidesRef.current[idx].photoIds
+            for (let r = 0; r < rects.length; r++) {
+              const rect = rects[r]
+              if (rect && x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
+                if (ids[r] !== photoId) swapPhotos(slideKey, photoId, ids[r])
+                break
+              }
+            }
+          }
+        }
       }
       cleanup()
     }
@@ -248,10 +321,17 @@ export default function App() {
   const exportOpts = { width: canvasW, height: canvasH }
   const downloadAll = async () => {
     if (exportState) return
-    setExportState({ done: 0, total: slides.length })
+    // empty slides are workspace, not output
+    const filled = slides.map((s, i) => ({ s, layout: layouts[i], bg: slideBgs[i] })).filter((x) => x.s.photoIds.length)
+    if (filled.length === 0) return
+    setExportState({ done: 0, total: filled.length })
     try {
-      const zip = await exportAllAsZip(slides, layouts, photos, { ...exportOpts, bgs: slideBgs, look }, (done, total) =>
-        setExportState({ done, total }),
+      const zip = await exportAllAsZip(
+        filled.map((x) => x.s),
+        filled.map((x) => x.layout),
+        photos,
+        { ...exportOpts, bgs: filled.map((x) => x.bg), look },
+        (done, total) => setExportState({ done, total }),
       )
       saveBlob(zip, 'carousel.zip')
       const btn = document.querySelector('.dock-btn-primary')
@@ -289,7 +369,7 @@ export default function App() {
       </div>
       <header className="topbar glass-thick">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
+          <Logo size={18} />
           <span className="brand-name">
             Photo Dump <span className="brand-arrow">→</span> Carousel
           </span>
@@ -374,63 +454,6 @@ export default function App() {
         </div>
       ) : (
         <>
-          <div className="controls glass">
-            <div className="control">
-              <span className="control-label">
-                Photos per slide <b>{perSlide === 'auto' ? 'Auto' : perSlide}</b>
-              </span>
-              <div className="per-slide">
-                <button
-                  className={`chip ${perSlide === 'auto' ? 'active' : ''}`}
-                  onClick={() => handlePerSlide('auto')}
-                  title="Slide sizes follow the photos — solo heroes, natural breaks"
-                >
-                  Auto
-                </button>
-                <input
-                  type="range"
-                  min="4"
-                  max="8"
-                  value={perSlide === 'auto' ? 6 : perSlide}
-                  className={perSlide === 'auto' ? 'dimmed' : ''}
-                  aria-label="Photos per slide"
-                  onChange={(e) => handlePerSlide(Number(e.target.value))}
-                />
-              </div>
-            </div>
-            <label className="control">
-              <span className="control-label">
-                Gutter <b>{gutter}px</b>
-              </span>
-              <input type="range" min="0" max="24" value={gutter} onChange={(e) => setGutter(Number(e.target.value))} />
-            </label>
-            <div className="control">
-              <span className="control-label">Background</span>
-              <div className="swatches">
-                {BG_SWATCHES.map((s) => (
-                  <button
-                    key={s.key}
-                    className={`swatch ${bgMode === s.key ? 'active' : ''} ${s.key === 'auto' ? 'swatch-auto' : ''}`}
-                    style={s.color ? { background: s.color } : undefined}
-                    title={s.label}
-                    aria-label={s.label}
-                    onClick={() => setBgMode(s.key)}
-                  />
-                ))}
-              </div>
-            </div>
-            <div className="control">
-              <span className="control-label">Aspect</span>
-              <div className="segmented">
-                {['4:5', '1:1'].map((a) => (
-                  <button key={a} className={aspect === a ? 'active' : ''} onClick={() => handleAspect(a)}>
-                    {a}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
           {busyImporting && (
             <div className="importing-inline">
               Reading {importState.done}/{importState.total}…
@@ -501,25 +524,8 @@ export default function App() {
                   <span className="slide-actions">
                     <button
                       className="icon-btn"
-                      onClick={() => moveSlide(i, i - 1)}
-                      disabled={i === 0}
-                      aria-label="Move slide left"
-                      title="Move left"
-                    >
-                      <Glyph d="M9.5 3.5 5 8l4.5 4.5" />
-                    </button>
-                    <button
-                      className="icon-btn"
-                      onClick={() => moveSlide(i, i + 1)}
-                      disabled={i === slides.length - 1}
-                      aria-label="Move slide right"
-                      title="Move right"
-                    >
-                      <Glyph d="M6.5 3.5 11 8l-4.5 4.5" />
-                    </button>
-                    <button
-                      className="icon-btn"
                       onClick={() => shuffleSlide(i)}
+                      disabled={slide.photoIds.length === 0}
                       aria-label="Shuffle this slide"
                       title="Shuffle this slide"
                     >
@@ -528,6 +534,7 @@ export default function App() {
                     <button
                       className="icon-btn"
                       onClick={() => downloadOne(i)}
+                      disabled={slide.photoIds.length === 0}
                       aria-label="Download this slide"
                       title="Download this slide"
                     >
@@ -535,19 +542,95 @@ export default function App() {
                     </button>
                   </span>
                 </div>
-                <SlideCanvas
-                  slide={slide}
-                  layout={layouts[i]}
-                  photos={photos}
-                  canvasW={canvasW}
-                  canvasH={canvasH}
-                  bg={slideBgs[i]}
-                  filters={slideFilters[i]}
-                  animKey={`${slide.key}:${slide.seed}:${slide.photoIds.join(',')}:${aspect}:${gutter}`}
-                  onPhotoPointerDown={(e, photoId) => startPhotoDrag(e, slide.key, photoId)}
-                />
+                {slide.photoIds.length === 0 ? (
+                  <div className="slide-empty" style={{ aspectRatio: `${canvasW} / ${canvasH}` }}>
+                    Drag photos here
+                  </div>
+                ) : (
+                  <SlideCanvas
+                    slide={slide}
+                    layout={layouts[i]}
+                    photos={photos}
+                    canvasW={canvasW}
+                    canvasH={canvasH}
+                    bg={slideBgs[i]}
+                    filters={slideFilters[i]}
+                    animKey={`${slide.key}:${slide.seed}:${slide.photoIds.join(',')}:${aspect}:${gutter}:${(slide.swaps ?? []).length}`}
+                    onPhotoPointerDown={(e, photoId) => startPhotoDrag(e, slide.key, photoId)}
+                  />
+                )}
               </div>
             ))}
+            {slides.length < MAX_SLIDES && !busyImporting && (
+              <button className="add-slide" onClick={addEmptySlide} aria-label="Add slide">
+                <span className="add-slide-plus" aria-hidden="true">
+                  +
+                </span>
+                <span className="add-slide-hint">New slide</span>
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
+      {hasPhotos && optionsOpen && (
+        <>
+          <div className="popover-backdrop" onPointerDown={() => setOptionsOpen(false)} />
+          <div className="options-popover glass-thick" role="dialog" aria-label="Options">
+            <div className="control">
+              <span className="control-label">
+                Photos per slide <b>{perSlide === 'auto' ? 'Auto' : perSlide}</b>
+              </span>
+              <div className="per-slide">
+                <button
+                  className={`chip ${perSlide === 'auto' ? 'active' : ''}`}
+                  onClick={() => handlePerSlide('auto')}
+                  title="Slide sizes follow the photos — solo heroes, natural breaks"
+                >
+                  Auto
+                </button>
+                <input
+                  type="range"
+                  min="4"
+                  max="8"
+                  value={perSlide === 'auto' ? 6 : perSlide}
+                  className={perSlide === 'auto' ? 'dimmed' : ''}
+                  aria-label="Photos per slide"
+                  onChange={(e) => handlePerSlide(Number(e.target.value))}
+                />
+              </div>
+            </div>
+            <label className="control">
+              <span className="control-label">
+                Gutter <b>{gutter}px</b>
+              </span>
+              <input type="range" min="0" max="24" value={gutter} onChange={(e) => setGutter(Number(e.target.value))} />
+            </label>
+            <div className="control">
+              <span className="control-label">Background</span>
+              <div className="swatches">
+                {BG_SWATCHES.map((s) => (
+                  <button
+                    key={s.key}
+                    className={`swatch ${bgMode === s.key ? 'active' : ''} ${s.key === 'auto' ? 'swatch-auto' : ''}`}
+                    style={s.color ? { background: s.color } : undefined}
+                    title={s.label}
+                    aria-label={s.label}
+                    onClick={() => setBgMode(s.key)}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="control">
+              <span className="control-label">Aspect</span>
+              <div className="segmented">
+                {['4:5', '1:1'].map((a) => (
+                  <button key={a} className={aspect === a ? 'active' : ''} onClick={() => handleAspect(a)}>
+                    {a}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </>
       )}
@@ -561,6 +644,13 @@ export default function App() {
             </button>
             <button className="dock-btn" onClick={shuffleAll} disabled={busyImporting}>
               Shuffle all
+            </button>
+            <button
+              className={`dock-btn ${optionsOpen ? 'dock-btn-active' : ''}`}
+              onClick={() => setOptionsOpen((o) => !o)}
+              aria-expanded={optionsOpen}
+            >
+              Options
             </button>
             <button
               className="dock-btn dock-btn-primary"
