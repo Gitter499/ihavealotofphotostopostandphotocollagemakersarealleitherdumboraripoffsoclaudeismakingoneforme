@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/banner.svg" alt="photogram" width="620"></p>
+<p align="center"><img src="docs/brand.svg" alt="photogram" width="620"></p>
 
 Dump your camera roll in, get finished Instagram carousel slides back. I made this because every collage app I tried either stops at one image or wants money to place 20 photos.
 

@@ -103,5 +103,5 @@ ${markGroup(markScale, PAD, (H - markH) / 2)}
 </svg>
 `
 mkdirSync(join(root, 'docs'), { recursive: true })
-writeFileSync(join(root, 'docs/banner.svg'), svg)
+writeFileSync(join(root, 'docs/brand.svg'), svg)
 console.log(`wordmark ${wordW.toFixed(0)}×${wordH.toFixed(0)}, banner ${W}×${H}`)
