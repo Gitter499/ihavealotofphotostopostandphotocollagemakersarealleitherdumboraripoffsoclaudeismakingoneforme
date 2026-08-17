@@ -149,11 +149,22 @@ try {
 
   await page.setInputFiles('[data-testid="file-input"]', files)
   await page.waitForSelector('.slide-card', { timeout: 30000 })
-  await page.waitForFunction(() => document.querySelectorAll('.slide-card').length >= 5, null, { timeout: 30000 })
+  await page.waitForFunction(
+    () => /30 photos/.test(document.querySelector('.counts')?.textContent || ''),
+    null,
+    { timeout: 30000 },
+  )
 
-  const slideCount = await page.locator('.slide-card').count()
-  assert.equal(slideCount, 5, `expected 5 slides for 30 photos, got ${slideCount}`)
-  console.log('  ok  30 photos → 5 slides')
+  // Auto mode (default): slide count adapts to the photos
+  const autoSlides = await page.locator('.slide-card').count()
+  assert.ok(autoSlides >= 4 && autoSlides <= 8, `auto grouping made ${autoSlides} slides for 30 photos`)
+  assert.match(await page.locator('.counts').textContent(), /30 photos · \d+ slides/)
+  console.log(`  ok  auto grouping → ${autoSlides} slides for 30 photos`)
+
+  // switch to manual 6 per slide for the deterministic assertions below
+  await page.locator('input[type="range"]').first().fill('6')
+  await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
+  console.log('  ok  manual 6 per slide → 5 slides')
 
   const counts = await page.locator('.counts').textContent()
   assert.match(counts, /30 photos · 5 slides/)
@@ -183,6 +194,17 @@ try {
   await page.locator('input[type="range"]').first().fill('4')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 8, null, { timeout: 10000 })
   console.log('  ok  photos-per-slide 4 regroups 30 photos into 8 slides (>5, cap is 20)')
+  await page.locator('input[type="range"]').first().fill('6')
+  await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
+
+  // Auto chip returns to dynamic grouping
+  await page.getByRole('button', { name: 'Auto' }).click()
+  await page.waitForFunction(
+    () => /30 photos · \d+ slides/.test(document.querySelector('.counts')?.textContent || ''),
+    null,
+    { timeout: 10000 },
+  )
+  console.log('  ok  Auto chip restores dynamic grouping')
   await page.locator('input[type="range"]').first().fill('6')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
 

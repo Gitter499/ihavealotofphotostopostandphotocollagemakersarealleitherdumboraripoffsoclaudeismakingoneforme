@@ -7,6 +7,7 @@ import {
   balanceOrientations,
   hammingDistance,
   effectiveQualities,
+  groupPhotosAuto,
 } from '../src/lib/grouping.js'
 import { computeLayout, cropLoss, MAX_CROP_LOSS } from '../src/lib/layout.js'
 import { mulberry32 } from '../src/lib/rng.js'
@@ -129,6 +130,62 @@ test('groupPhotos returns groups plus excluded tail', () => {
 })
 
 const LAYOUT_OPTS = { canvasW: 1080, canvasH: 1350, margin: 16, gutter: 8, baseSeed: 12345 }
+
+// ---------- dynamic (Auto) grouping ----------
+
+const makePhotos = (n, fn = () => ({})) => {
+  const map = new Map()
+  for (let i = 0; i < n; i++) map.set(i + 1, { aspect: 1, quality: 0.5, date: null, ...fn(i) })
+  return map
+}
+
+test('auto grouping keeps sizes 1–8, everything included, ≤20 slides', () => {
+  const photos = makePhotos(47)
+  const ids = [...photos.keys()]
+  const { groups, excluded, notice } = groupPhotosAuto(ids, (id) => photos.get(id))
+  assert.equal(excluded.length, 0)
+  assert.equal(notice, null)
+  assert.ok(groups.length <= 20)
+  assert.equal(groups.flat().length, 47)
+  for (const g of groups) assert.ok(g.length >= 1 && g.length <= 8, `bad size ${g.length}`)
+})
+
+test('auto grouping cuts at large time gaps — 4 bursts → 4 slides', () => {
+  const photos = makePhotos(24, (i) => ({
+    date: Math.floor(i / 6) * 10_000_000 + (i % 6) * 1000, // 4 bursts, ~3h apart
+  }))
+  const ids = [...photos.keys()]
+  const { groups } = groupPhotosAuto(ids, (id) => photos.get(id))
+  assert.equal(groups.length, 4, `expected 4 burst slides, got ${groups.map((g) => g.length)}`)
+  assert.deepEqual(groups.map((g) => g.length), [6, 6, 6, 6])
+})
+
+test('a standout photo earns a solo hero slide', () => {
+  const photos = makePhotos(13, (i) => ({ quality: i === 6 ? 0.95 : 0.4 }))
+  const ids = [...photos.keys()]
+  const { groups } = groupPhotosAuto(ids, (id) => photos.get(id))
+  const solo = groups.find((g) => g.length === 1)
+  assert.ok(solo, `no solo slide in ${groups.map((g) => g.length)}`)
+  assert.equal(solo[0], 7, 'the solo slide should hold the standout photo')
+})
+
+test('uniform photos produce no gratuitous solo slides', () => {
+  const photos = makePhotos(30)
+  const ids = [...photos.keys()]
+  const { groups } = groupPhotosAuto(ids, (id) => photos.get(id))
+  for (const g of groups) assert.ok(g.length >= 4, `unjustified small slide: ${groups.map((x) => x.length)}`)
+})
+
+test('auto grouping reports overflow past the 20×8 ceiling', () => {
+  const photos = makePhotos(200)
+  const ids = [...photos.keys()]
+  const { groups, excluded, notice } = groupPhotosAuto(ids, (id) => photos.get(id))
+  assert.equal(notice.type, 'overflow')
+  assert.equal(notice.excluded, 40)
+  assert.equal(groups.flat().length, 160)
+  assert.equal(excluded.length, 40)
+  assert.ok(groups.length <= 20)
+})
 
 // ---------- smarter selection ----------
 

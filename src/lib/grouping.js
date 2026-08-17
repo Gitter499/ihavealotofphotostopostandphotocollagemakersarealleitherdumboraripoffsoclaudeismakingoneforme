@@ -75,6 +75,8 @@ export function balanceOrientations(groups, aspectOf) {
     for (let gi = 0; gi < groups.length - 1; gi++) {
       const a = groups[gi]
       const b = groups[gi + 1]
+      // tiny slides (solo heroes, pairs) are deliberate — leave them alone
+      if (a.length < 3 || b.length < 3) continue
       // candidates: last two of a, first two of b
       const aIdxs = a.length > 1 ? [a.length - 1, a.length - 2] : [a.length - 1]
       const bIdxs = b.length > 1 ? [0, 1] : [0]
@@ -159,4 +161,115 @@ export function groupPhotos(sortedIds, aspectOf, perSlide) {
   }
   balanceOrientations(groups, aspectOf)
   return { groups, excluded: sortedIds.slice(included), notice }
+}
+
+// ---- dynamic grouping (Auto mode) ----
+//
+// Instead of a fixed target, choose variable slide sizes (1–8) with a DP over
+// the chronological sequence. The cost model prefers 4–7 photos per slide but
+// lets the content justify exceptions:
+//  - cuts are cheap at large EXIF time gaps (natural event boundaries)
+//  - a photo that clearly outshines its neighbours earns a solo hero slide
+//  - extreme panoramas / verticals also read well alone
+// Still clamped to Instagram's 20-slide × 8-photo ceiling.
+
+const SIZE_COST = [Infinity, 2.4, 1.1, 0.45, 0.12, 0, 0, 0.15, 0.45]
+
+const clamp01 = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+
+function median(values) {
+  if (values.length === 0) return 0
+  const s = [...values].sort((a, b) => a - b)
+  return s[s.length >> 1]
+}
+
+export function groupPhotosAuto(sortedIds, getPhoto) {
+  const capacity = MAX_SLIDES * HARD_MAX_PER_SLIDE
+  let notice = null
+  let ids = sortedIds
+  if (ids.length > capacity) {
+    notice = { type: 'overflow', excluded: ids.length - capacity, included: capacity }
+    ids = ids.slice(0, capacity)
+  }
+  const n = ids.length
+  if (n === 0) return { groups: [], excluded: sortedIds.slice(0), notice }
+
+  const photo = (i) => getPhoto(ids[i]) ?? {}
+  // gap after photo i (between i and i+1), in ms; null when dates are missing
+  const gaps = []
+  for (let i = 0; i < n - 1; i++) {
+    const a = photo(i).date
+    const b = photo(i + 1).date
+    gaps.push(a != null && b != null ? Math.max(0, b - a) : null)
+  }
+  const known = gaps.filter((g) => g != null && g > 0)
+  const medGap = median(known) || 1
+
+  // cutting after photo i: cheap when the time gap there is large
+  const cutCost = (i) => {
+    if (i >= n - 1) return 0 // final boundary is free
+    const g = gaps[i]
+    if (g == null || known.length < 3) return 0.45
+    const score = clamp01(Math.log2(Math.max(g, 1) / medGap) / 3, 0, 1)
+    return 0.9 * (1 - score)
+  }
+
+  // how much photo i stands out from its neighbourhood (drives hero slides)
+  const standout = (i) => {
+    const q = photo(i).quality ?? 0.5
+    let sum = 0
+    let count = 0
+    for (let j = Math.max(0, i - 3); j <= Math.min(n - 1, i + 3); j++) {
+      if (j === i) continue
+      sum += photo(j).quality ?? 0.5
+      count++
+    }
+    if (count === 0) return 0
+    return q - sum / count
+  }
+
+  const groupCost = (start, end) => {
+    // photos [start, end)
+    const s = end - start
+    let cost = SIZE_COST[s]
+    if (s === 1) {
+      cost -= clamp01(standout(start) * 8, 0, 2.9)
+      const a = photo(start).aspect ?? 1
+      if (a >= 1.85 || a <= 0.55) cost -= 0.6 // panoramas & tall verticals carry a slide alone
+    }
+    return cost + cutCost(end - 1)
+  }
+
+  // dp[i][g] = min cost of first i photos in g slides
+  const INF = Number.POSITIVE_INFINITY
+  const dp = Array.from({ length: n + 1 }, () => new Float64Array(MAX_SLIDES + 1).fill(INF))
+  const choice = Array.from({ length: n + 1 }, () => new Int8Array(MAX_SLIDES + 1))
+  dp[0][0] = 0
+  for (let i = 1; i <= n; i++) {
+    for (let g = 1; g <= MAX_SLIDES; g++) {
+      for (let k = 1; k <= Math.min(HARD_MAX_PER_SLIDE, i); k++) {
+        const prev = dp[i - k][g - 1]
+        if (prev === INF) continue
+        const c = prev + groupCost(i - k, i)
+        if (c < dp[i][g]) {
+          dp[i][g] = c
+          choice[i][g] = k
+        }
+      }
+    }
+  }
+  let bestG = 1
+  for (let g = 1; g <= MAX_SLIDES; g++) if (dp[n][g] < dp[n][bestG]) bestG = g
+
+  const groups = []
+  let i = n
+  let g = bestG
+  while (i > 0) {
+    const k = choice[i][g]
+    groups.unshift(ids.slice(i - k, i))
+    i -= k
+    g--
+  }
+  balanceOrientations(groups, (id) => getPhoto(id)?.aspect ?? 1)
+  return { groups, excluded: sortedIds.slice(ids.length), notice }
 }

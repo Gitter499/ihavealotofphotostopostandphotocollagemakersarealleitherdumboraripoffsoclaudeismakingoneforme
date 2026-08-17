@@ -26,10 +26,14 @@ so upload order is unambiguous.
 1. **Order** — EXIF `DateTimeOriginal` (via `exifr`), falling back to
    filename, then file order. A photo dump has an implicit narrative;
    chronology preserves it for free.
-2. **Group** — balanced slides of 4–8 photos (target set by a slider,
-   default 6), with neighbour-only swaps to mix portrait/landscape per slide
-   without wrecking chronology. Slide count grows with the dump — 30 photos
-   → 5 slides, 100 → 17 — up to Instagram's 20-slide carousel limit.
+2. **Group** — in Auto mode (the default) slide sizes are dynamic, chosen
+   by a cost-based partition over the chronological sequence: slides break
+   at large EXIF time gaps, a photo that clearly outshines its neighbours
+   earns a solo hero slide, extreme panoramas/verticals also stand alone,
+   and everything else lands in slides of 4–8. A slider can force a fixed
+   count instead. Neighbour-only swaps mix portrait/landscape per slide
+   without wrecking chronology. Slide count grows with the dump up to
+   Instagram's 20-slide carousel limit.
 3. **Lay out** — recursive binary space partitioning on a 1080×1350 canvas,
    split direction/position weighted by the aspect ratios of the photos
    assigned to each side, then per-node refinement to minimise crop loss.
@@ -49,7 +53,8 @@ page load — zero network requests afterwards.
 ## Controls
 
 Everything has a working default — the app produces a finished result before
-you touch anything. Shuffle (per-slide and all), photos per slide, gutter
+you touch anything. Shuffle (per-slide and all), photos per slide (Auto or
+a fixed 4–8), gutter
 width, background (near-black / off-white / sampled from the photos),
 aspect ratio (4:5 or 1:1), drag a slide header to reorder slides, drag a
 photo onto another slide to move it (press-and-hold on touch).

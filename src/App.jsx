@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { importFiles } from './lib/importer.js'
-import { sortPhotos, groupPhotos, effectiveQualities } from './lib/grouping.js'
+import { sortPhotos, groupPhotos, groupPhotosAuto, effectiveQualities } from './lib/grouping.js'
 import { computeLayout } from './lib/layout.js'
 import { averageColor, ambientFrom } from './lib/colors.js'
 import { exportAllAsZip, renderSlideBlob, slideFileName, saveBlob } from './lib/exportZip.js'
@@ -22,7 +22,7 @@ const baseSeedFor = (i) => ((i + 1) * 2654435761) >>> 0
 export default function App() {
   const [photos, setPhotos] = useState(() => new Map())
   const [slides, setSlides] = useState([])
-  const [perSlide, setPerSlide] = useState(6)
+  const [perSlide, setPerSlide] = useState('auto') // 'auto' | 4..8
   const [gutter, setGutter] = useState(8)
   const [bgMode, setBgMode] = useState('dark')
   const [aspect, setAspect] = useState('4:5')
@@ -40,11 +40,11 @@ export default function App() {
 
   const recompose = useCallback((photosMap, per) => {
     const sorted = sortPhotos([...photosMap.values()])
-    const { groups, notice } = groupPhotos(
-      sorted.map((p) => p.id),
-      (id) => photosMap.get(id).aspect,
-      per,
-    )
+    const sortedIds = sorted.map((p) => p.id)
+    const { groups, notice } =
+      per === 'auto'
+        ? groupPhotosAuto(sortedIds, (id) => photosMap.get(id))
+        : groupPhotos(sortedIds, (id) => photosMap.get(id).aspect, per)
     setNotice(notice)
     setSlides(
       groups.map((ids, i) => ({
@@ -350,18 +350,29 @@ export default function App() {
       ) : (
         <>
           <div className="controls glass">
-            <label className="control">
+            <div className="control">
               <span className="control-label">
-                Photos per slide <b>{perSlide}</b>
+                Photos per slide <b>{perSlide === 'auto' ? 'Auto' : perSlide}</b>
               </span>
-              <input
-                type="range"
-                min="4"
-                max="8"
-                value={perSlide}
-                onChange={(e) => handlePerSlide(Number(e.target.value))}
-              />
-            </label>
+              <div className="per-slide">
+                <button
+                  className={`chip ${perSlide === 'auto' ? 'active' : ''}`}
+                  onClick={() => handlePerSlide('auto')}
+                  title="Slide sizes follow the photos — solo heroes, natural breaks"
+                >
+                  Auto
+                </button>
+                <input
+                  type="range"
+                  min="4"
+                  max="8"
+                  value={perSlide === 'auto' ? 6 : perSlide}
+                  className={perSlide === 'auto' ? 'dimmed' : ''}
+                  aria-label="Photos per slide"
+                  onChange={(e) => handlePerSlide(Number(e.target.value))}
+                />
+              </div>
+            </div>
             <label className="control">
               <span className="control-label">
                 Gutter <b>{gutter}px</b>
@@ -429,7 +440,9 @@ export default function App() {
                   title="Drag to reorder"
                 >
                   <span className="slide-num">{String(i + 1).padStart(2, '0')}</span>
-                  <span className="slide-count">{slide.photoIds.length} photos</span>
+                  <span className="slide-count">
+                    {slide.photoIds.length} {slide.photoIds.length === 1 ? 'photo' : 'photos'}
+                  </span>
                   <span className="slide-actions">
                     <button
                       className="icon-btn"
