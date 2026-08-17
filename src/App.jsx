@@ -484,14 +484,9 @@ export default function App() {
       </div>
       <header className="topbar glass-thick">
         <div className="brand">
-          <Logo size={18} />
-          <Wordmark height={15} />
+          <Logo size={26} />
+          <Wordmark height={21} />
         </div>
-        {hasPhotos && (
-          <div className="counts" aria-live="polite">
-            {photos.size} photos · {slides.length} slides
-          </div>
-        )}
       </header>
 
       <input
@@ -784,6 +779,12 @@ export default function App() {
                 </button>
               </div>
             </div>
+        </div>
+      )}
+
+      {hasPhotos && (
+        <div className="counts stats-corner glass-thin" aria-live="polite">
+          {photos.size} photos · {slides.length} slides
         </div>
       )}
 
