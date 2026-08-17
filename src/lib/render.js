@@ -13,6 +13,27 @@ export function tiltAngle(photoId, tiltDeg) {
   return ((unit * tiltDeg) * Math.PI) / 180
 }
 
+// Bake a photo's orientation into a new drawable: `rot` clockwise quarter
+// turns, then `flip` mirrors horizontally. Previews, filtered bitmaps and
+// full-res exports all pass through this so every surface agrees.
+export function orientBitmap(img, rot = 0, flip = false) {
+  rot = ((rot % 4) + 4) % 4
+  if (!rot && !flip) return img
+  const odd = rot % 2 === 1
+  const w = odd ? img.height : img.width
+  const h = odd ? img.width : img.height
+  const c = new OffscreenCanvas(w, h)
+  const x = c.getContext('2d')
+  if (flip) {
+    x.translate(w, 0)
+    x.scale(-1, 1)
+  }
+  x.translate(w / 2, h / 2)
+  x.rotate((rot * Math.PI) / 2)
+  x.drawImage(img, -img.width / 2, -img.height / 2)
+  return c
+}
+
 function roundedRectPath(ctx, x, y, w, h, r) {
   const rr = Math.min(r, w / 2, h / 2)
   ctx.beginPath()

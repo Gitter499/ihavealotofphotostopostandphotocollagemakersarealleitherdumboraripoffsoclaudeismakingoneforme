@@ -16,7 +16,7 @@ import { fireConfetti } from './lib/confetti.js'
 import { exportAllAsZip, renderSlideBlob, slideFileName, saveBlob } from './lib/exportZip.js'
 import { remixPlan } from './lib/remix.js'
 import { randomSeed } from './lib/rng.js'
-import { tiltAngle } from './lib/render.js'
+import { tiltAngle, orientBitmap } from './lib/render.js'
 import { templatesFor, templateById, templateRects } from './lib/templates.js'
 import { haptics } from './lib/haptics.js'
 import SlideCanvas from './components/SlideCanvas.jsx'
@@ -45,6 +45,8 @@ import {
   CopyIcon,
   ArrowUUpLeftIcon,
   ArrowUUpRightIcon,
+  ArrowClockwiseIcon,
+  FlipHorizontalIcon,
 } from '@phosphor-icons/react'
 
 const BG_SWATCHES = [
@@ -108,6 +110,7 @@ export default function App() {
   const [borderStyle, setBorderStyle] = useState('solid') // solid | double | dashed
   const [lookStrength, setLookStrength] = useState(1) // 0..1 dial on the active look
   const [exportFormat, setExportFormat] = useState('jpeg') // jpeg | png
+  const [exportSize, setExportSize] = useState('post') // post 1440 | hd 2160 | print 3240
   const [customAspect, setCustomAspect] = useState({ w: 4, h: 5 })
   const [aspect, setAspect] = useState('4:5')
   const [importState, setImportState] = useState(null) // {done, total}
@@ -194,13 +197,18 @@ export default function App() {
       let n = 0
       for (const rec of stored) {
         try {
-          const scale = Math.min(1, 480 / Math.max(rec.width, rec.height))
-          const previewBitmap = await createImageBitmap(rec.blob, {
-            resizeWidth: Math.max(1, Math.round(rec.width * scale)),
-            resizeHeight: Math.max(1, Math.round(rec.height * scale)),
+          // rec.width/height are view dims — the blob keeps its original
+          // orientation, so decode at blob dims and re-apply rot/flip
+          const odd = (rec.rot ?? 0) % 2 === 1
+          const bw = odd ? rec.height : rec.width
+          const bh = odd ? rec.width : rec.height
+          const scale = Math.min(1, 480 / Math.max(bw, bh))
+          const decoded = await createImageBitmap(rec.blob, {
+            resizeWidth: Math.max(1, Math.round(bw * scale)),
+            resizeHeight: Math.max(1, Math.round(bh * scale)),
             resizeQuality: 'medium',
           })
-          map.set(rec.id, { ...rec, previewBitmap })
+          map.set(rec.id, { ...rec, previewBitmap: orientBitmap(decoded, rec.rot ?? 0, !!rec.flip) })
         } catch {
           // a record that no longer decodes just drops out
         }
@@ -232,6 +240,7 @@ export default function App() {
       setBorderStyle(workspace.borderStyle ?? 'solid')
       setLookStrength(workspace.lookStrength ?? 1)
       setExportFormat(workspace.exportFormat ?? 'jpeg')
+      setExportSize(workspace.exportSize ?? 'post')
       setMeshSeams(new Set(workspace.meshSeams ?? []))
       setSizeBoosts(new Map(workspace.sizeBoosts ?? []))
       setSlideTemplates(new Map(workspace.slideTemplates ?? []))
@@ -265,6 +274,7 @@ export default function App() {
         borderStyle,
         lookStrength,
         exportFormat,
+        exportSize,
         meshSeams: [...meshSeams],
         sizeBoosts: [...sizeBoosts],
         slideTemplates: [...slideTemplates],
@@ -273,7 +283,7 @@ export default function App() {
       })
     }, 800)
     return () => clearTimeout(t)
-  }, [restoring, photos, slides, tray, perSlide, gutter, bgMode, look, tilt, cornerRadius, aspect, customAspect, borderW, borderColor, borderStyle, lookStrength, exportFormat, meshSeams, sizeBoosts, slideTemplates, captions])
+  }, [restoring, photos, slides, tray, perSlide, gutter, bgMode, look, tilt, cornerRadius, aspect, customAspect, borderW, borderColor, borderStyle, lookStrength, exportFormat, exportSize, meshSeams, sizeBoosts, slideTemplates, captions])
 
   // Per-photo pan: nudge the crop's focal point inside its cell. The photo
   // object carries the new focal (so previews, exports, and the stored
@@ -296,11 +306,71 @@ export default function App() {
     savePhotos([upd])
   }
 
-  const resetPhotoEdits = (photoId) => {
+  // Rotate / flip: the orientation is baked into a fresh preview bitmap on
+  // the spot (exports and session restore re-apply it from the rot/flip
+  // fields), and the focal point rides along so the crop stays on subject.
+  const rotatePhoto = (photoId) => {
+    const p = photos.get(photoId)
+    if (!p?.previewBitmap) return
+    pushHistory(`rot:${photoId}`)
+    haptics.select()
+    const turn = ({ x, y }) => ({ x: 1 - y, y: x })
+    const upd = {
+      ...p,
+      previewBitmap: orientBitmap(p.previewBitmap, 1, false),
+      width: p.height,
+      height: p.width,
+      aspect: p.height / p.width,
+      rot: ((p.rot ?? 0) + (p.flip ? 3 : 1)) % 4,
+      focal: p.focal ? turn(p.focal) : null,
+      focalAuto: p.focalAuto ? turn(p.focalAuto) : (p.focalAuto ?? null),
+    }
+    setPhotos((prev) => new Map(prev).set(photoId, upd))
+    savePhotos([upd])
+  }
+
+  const flipPhoto = (photoId) => {
+    const p = photos.get(photoId)
+    if (!p?.previewBitmap) return
+    pushHistory(`flip:${photoId}`)
+    haptics.select()
+    const mirror = ({ x, y }) => ({ x: 1 - x, y })
+    const upd = {
+      ...p,
+      previewBitmap: orientBitmap(p.previewBitmap, 0, true),
+      flip: !p.flip,
+      focal: p.focal ? mirror(p.focal) : null,
+      focalAuto: p.focalAuto ? mirror(p.focalAuto) : (p.focalAuto ?? null),
+    }
+    setPhotos((prev) => new Map(prev).set(photoId, upd))
+    savePhotos([upd])
+  }
+
+  const resetPhotoEdits = async (photoId) => {
     const p = photos.get(photoId)
     if (!p) return
     pushHistory()
-    const upd = { ...p, focal: p.focalAuto ?? p.focal }
+    const upd = { ...p, focal: p.focalAuto ?? p.focal, rot: 0, flip: false }
+    if ((p.rot ?? 0) !== 0 || p.flip) {
+      // un-rotating means re-deriving the preview from the untouched blob
+      const ow = (p.rot ?? 0) % 2 === 1 ? p.height : p.width
+      const oh = (p.rot ?? 0) % 2 === 1 ? p.width : p.height
+      const scale = Math.min(1, 480 / Math.max(ow, oh))
+      try {
+        upd.previewBitmap = await createImageBitmap(p.blob, {
+          resizeWidth: Math.max(1, Math.round(ow * scale)),
+          resizeHeight: Math.max(1, Math.round(oh * scale)),
+          resizeQuality: 'medium',
+        })
+        upd.width = ow
+        upd.height = oh
+        upd.aspect = ow / oh
+      } catch {
+        // keep the oriented preview if the blob refuses to decode
+        upd.rot = p.rot ?? 0
+        upd.flip = !!p.flip
+      }
+    }
     setPhotos((prev) => new Map(prev).set(photoId, upd))
     savePhotos([upd])
     setSizeBoosts((prev) => {
@@ -594,7 +664,7 @@ export default function App() {
       const map = new Map()
       let n = 0
       for (const p of photos.values()) {
-        const key = `${p.id}${suffix}`
+        const key = `${p.id}o${p.rot ?? 0}${p.flip ? 'f' : ''}${suffix}`
         let bmp = cache.get(key)
         if (!bmp && p.previewBitmap) {
           bmp = await filteredBitmap(p.previewBitmap, withStrength(matrixFor(p, look), lookStrength))
@@ -703,6 +773,31 @@ export default function App() {
     setSlides((prev) =>
       prev.map((s) => (s.key === slideKey ? { ...s, swaps: [...(s.swaps ?? []), [idA, idB]] } : s)),
     )
+  }
+
+  // A shelf photo dropped on a cell slots in right at that position. If the
+  // slide is already at capacity the drop swaps instead: the shelf photo
+  // takes the slot and the old photo goes to the shelf.
+  const dropFromTray = (trayId, targetId) => {
+    const target = slidesRef.current.find((s) => s.photoIds.includes(targetId))
+    if (!target) return
+    const swap = target.photoIds.length >= 8
+    pushHistory()
+    haptics.success()
+    setSlides((prev) =>
+      prev.map((s) => {
+        const idx = s.photoIds.indexOf(targetId)
+        if (idx < 0) return s
+        const ids = [...s.photoIds]
+        if (swap) ids[idx] = trayId
+        else ids.splice(idx, 0, trayId)
+        return { ...s, photoIds: ids }
+      }),
+    )
+    setTray((t) => {
+      const rest = t.filter((id) => id !== trayId)
+      return swap ? [...rest, targetId] : rest
+    })
   }
 
   // in a merged group, dropping a photo onto a cell owned by another member
@@ -940,7 +1035,30 @@ export default function App() {
           relocatePhoto(photoId, TRAY_KEY)
         } else if (el?.closest?.('.add-slide')) {
           relocatePhoto(photoId, ADD_KEY)
-        } else if (toKey && (fromTray || toKey !== ownerKey)) {
+        } else if (toKey && fromTray) {
+          // a shelf photo dropped on a cell slots in at that position (or
+          // swaps, when the slide is full); on empty canvas it just joins
+          const canvasEl = card.querySelector('.slide-canvas')
+          const idx = slidesRef.current.findIndex((s) => s.key === toKey)
+          let targetId = null
+          if (canvasEl && idx >= 0) {
+            const box = canvasEl.getBoundingClientRect()
+            const x = ((ev.clientX - box.left) / box.width) * canvasW
+            const y = ((ev.clientY - box.top) / box.height) * canvasH
+            const layout = layoutsRef.current[idx] ?? {}
+            const ids = layout.drawIds ?? slidesRef.current[idx].photoIds
+            const rects = layout.drawRects ?? layout.rects ?? []
+            for (let r = rects.length - 1; r >= 0; r--) {
+              const rect = rects[r]
+              if (rect && x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
+                targetId = ids[r]
+                break
+              }
+            }
+          }
+          if (targetId != null) dropFromTray(photoId, targetId)
+          else relocatePhoto(photoId, toKey)
+        } else if (toKey && toKey !== ownerKey) {
           relocatePhoto(photoId, toKey)
         } else if (toKey === ownerKey && !fromTray) {
           // dropped within the same slide → swap with the photo under the pointer
@@ -989,7 +1107,8 @@ export default function App() {
   const slideDragIndex = useRef(null)
 
   // ---- export ----
-  const exportOpts = { width: canvasW, height: canvasH }
+  const EXPORT_SCALES = { post: 4 / 3, hd: 2, print: 3 }
+  const exportOpts = { width: canvasW, height: canvasH, scale: EXPORT_SCALES[exportSize] ?? 4 / 3 }
   const downloadAll = async () => {
     if (exportState) return
     // empty slides are workspace, not output
@@ -1538,6 +1657,17 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              <div className="segmented" role="group" aria-label="Export size">
+                {[
+                  ['post', 'Post', 'Instagram max — 1440px wide'],
+                  ['hd', 'HD', '2160px wide'],
+                  ['print', 'Print', '3240px wide — 300dpi at ~11in'],
+                ].map(([k, label, tip]) => (
+                  <button key={k} className={exportSize === k ? 'active' : ''} title={tip} onClick={() => setExportSize(k)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="control">
               <span className="control-label">Session</span>
@@ -1867,6 +1997,16 @@ export default function App() {
             <button className="chip" onClick={() => resetPhotoEdits(sizeEdit.photoId)}>
               Reset
             </button>
+            <button
+              className="chip"
+              title="Park this photo on the playground shelf"
+              onClick={() => {
+                relocatePhoto(sizeEdit.photoId, TRAY_KEY)
+                setSizeEdit(null)
+              }}
+            >
+              To shelf
+            </button>
           </div>
           <span className="control-label">Position</span>
           <div className="size-popover-row nudge-row">
@@ -1887,6 +2027,28 @@ export default function App() {
               </button>
             ))}
             <span className="nudge-hint">slides the crop inside its slot</span>
+          </div>
+          <span className="control-label">Orientation</span>
+          <div className="size-popover-row nudge-row">
+            <button
+              className="icon-btn"
+              aria-label="Rotate 90°"
+              title="Rotate 90° clockwise"
+              onClick={() => rotatePhoto(sizeEdit.photoId)}
+            >
+              <ArrowClockwiseIcon size={16} weight="bold" />
+            </button>
+            <button
+              className="icon-btn"
+              aria-label="Flip horizontally"
+              title="Flip horizontally"
+              onClick={() => flipPhoto(sizeEdit.photoId)}
+            >
+              <FlipHorizontalIcon size={16} weight="bold" />
+            </button>
+            <span className="nudge-hint">
+              {(photos.get(sizeEdit.photoId)?.rot ?? 0) * 90}°{photos.get(sizeEdit.photoId)?.flip ? ' · mirrored' : ''}
+            </span>
           </div>
         </div>
       )}

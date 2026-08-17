@@ -560,10 +560,23 @@ try {
   await dlPng.saveAs(pngPath)
   const pngBuf = readFileSync(pngPath)
   assert.equal(pngBuf.readUInt32BE(0), 0x89504e47, 'not a PNG file')
+  assert.equal(pngBuf.readUInt32BE(16), 1440, 'Post preset should export 1440 wide')
+  // size presets scale the same slide up: Print = 3240px wide
+  await openOptions()
+  await page.locator('[aria-label="Export size"]').getByRole('button', { name: 'Print' }).click()
+  await closeOptions()
+  const [dlPrint] = await Promise.all([
+    page.waitForEvent('download', { timeout: 60000 }),
+    page.locator('.slide-card').first().locator('[aria-label="Download this slide"]').click(),
+  ])
+  const printPath = join(tmp, 'print.png')
+  await dlPrint.saveAs(printPath)
+  assert.equal(readFileSync(printPath).readUInt32BE(16), 3240, 'Print preset should export 3240 wide')
   await openOptions()
   await page.locator('[aria-label="Export format"]').getByRole('button', { name: 'JPEG' }).click()
+  await page.locator('[aria-label="Export size"]').getByRole('button', { name: 'Post' }).click()
   await closeOptions()
-  console.log('  ok  PNG export toggle produces real PNGs')
+  console.log('  ok  PNG export and the Post/HD/Print size presets produce real pixels')
 
   // add-slide skeleton: appends an empty slide, fillable via its stepper
   const slidesBefore = await page.locator('.slide-card').count()
@@ -716,12 +729,23 @@ try {
     preNudge,
     'nudging did not move the crop',
   )
+  // orientation: rotate turns the photo (aspect flips, layout reflows),
+  // flip mirrors it; Reset restores the original from the blob
+  const preRotate = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  await page.locator('[aria-label="Rotate 90°"]').click()
+  await page.waitForTimeout(900)
+  const postRotate = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  assert.notEqual(postRotate, preRotate, 'rotate did not change the slide')
+  await page.locator('[aria-label="Flip horizontally"]').click()
+  await page.waitForTimeout(700)
+  const postFlip = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  assert.notEqual(postFlip, postRotate, 'flip did not change the slide')
   await page.locator('.size-popover').getByRole('button', { name: 'Reset' }).click()
-  await page.waitForTimeout(400)
+  await page.waitForTimeout(900)
   await page.keyboard.press('Escape')
   await page.waitForTimeout(200)
   assert.equal(await page.locator('.size-popover').count(), 0, 'Escape should close the size popover')
-  console.log('  ok  tap opens the photo editor: size slider resizes, nudges pan the crop')
+  console.log('  ok  tap opens the photo editor: size, pan, rotate and flip all rework the slide')
 
   // layout templates: pin a classic and the slide snaps to it; Auto unpins
   await page.locator('.slide-canvas').first().scrollIntoViewIfNeeded()
