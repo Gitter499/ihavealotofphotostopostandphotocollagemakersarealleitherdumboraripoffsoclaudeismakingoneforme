@@ -729,6 +729,16 @@ body[data-dragging='1'] .bottom-cluster {
   color: #fff;
 }
 
+.chip-danger {
+  align-self: flex-start;
+  color: #ff6961;
+  border-color: rgba(255, 105, 97, 0.35);
+}
+
+.chip-danger:hover {
+  background: rgba(255, 69, 58, 0.14);
+}
+
 input[type='range'].dimmed {
   opacity: 0.45;
 }

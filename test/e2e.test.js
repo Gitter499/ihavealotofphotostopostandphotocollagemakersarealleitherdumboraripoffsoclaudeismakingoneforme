@@ -658,6 +658,26 @@ try {
   assert.ok(swReady, 'service worker should be registered')
   console.log('  ok  offline service worker registered')
 
+  // a reload restores the whole session from IndexedDB — photos, slides,
+  // and arrangement state like captions
+  await page.locator('[aria-label="Caption"]').first().click()
+  await page.locator('.cap-input').fill('still here')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(1400) // let the debounced snapshot land
+  await page.reload()
+  // 29 photos here — the delete-slide test above took one with it
+  await page.waitForFunction(() => /29 photos/.test(document.querySelector('.counts')?.textContent || ''), null, {
+    timeout: 30000,
+  })
+  await page.waitForTimeout(1200)
+  assert.equal(await page.locator('.slide-card').count(), 5, 'slides did not restore after reload')
+  await page.locator('[aria-label="Caption"]').first().click()
+  assert.equal(await page.locator('.cap-input').inputValue(), 'still here', 'caption did not survive the reload')
+  await page.locator('.cap-input').fill('')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(1200)
+  console.log('  ok  reload restores the whole session from IndexedDB')
+
   // phone width: the stats chip must sit clear of the dock, not under it
   await page.setViewportSize({ width: 390, height: 844 })
   await page.waitForTimeout(400)
@@ -676,14 +696,20 @@ try {
   await page.locator('[aria-label="Slide actions"]').first().click()
   await page.waitForTimeout(400)
   assert.equal(await page.locator('.action-sheet .sheet-row').count(), 5, 'action sheet should list all five actions')
-  const sheetRect = await page.evaluate(() => document.querySelector('.action-sheet').getBoundingClientRect().toJSON())
-  assert.ok(Math.abs(sheetRect.bottom - 844) < 2, `action sheet should sit on the bottom edge (bottom ${sheetRect.bottom})`)
+  // the spring animation overshoots on entry — wait for the sheet to settle
+  await page.waitForFunction(
+    () => Math.abs(document.querySelector('.action-sheet').getBoundingClientRect().bottom - window.innerHeight) < 2,
+    null,
+    { timeout: 5000 },
+  )
   await page.locator('.sheet-row', { hasText: 'Caption' }).click()
-  await page.waitForTimeout(400)
-  const capRect = await page.evaluate(() => document.querySelector('.cap-popover').getBoundingClientRect().toJSON())
-  assert.ok(
-    Math.abs(capRect.bottom - 844) < 2 && capRect.width >= 388,
-    `caption editor should be a full-width bottom sheet (${capRect.bottom}, ${capRect.width})`,
+  await page.waitForFunction(
+    () => {
+      const r = document.querySelector('.cap-popover')?.getBoundingClientRect()
+      return r && Math.abs(r.bottom - window.innerHeight) < 2 && r.width >= 388
+    },
+    null,
+    { timeout: 5000 },
   )
   await page.keyboard.press('Escape')
   await page.waitForTimeout(200)

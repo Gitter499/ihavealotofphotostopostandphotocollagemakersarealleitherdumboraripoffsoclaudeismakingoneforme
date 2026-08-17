@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { importFiles } from './lib/importer.js'
+import { importFiles, bumpIdCounter } from './lib/importer.js'
+import { savePhotos, deletePhotos, saveWorkspace, loadSession, clearSession } from './lib/store.js'
 import {
   sortPhotos,
   groupPhotos,
@@ -102,6 +103,7 @@ export default function App() {
   const [drag, setDrag] = useState(null) // {photoId, fromKey, x, y, overKey}
   const [hoverSeam, setHoverSeam] = useState(null) // seam index under the pointer — previews the join
   const [tray, setTray] = useState([]) // playground: photo ids set aside from every slide
+  const [restoring, setRestoring] = useState(true) // gate saves until the stored session loads
   const fileInputRef = useRef(null)
   const trayRef = useRef(tray)
   trayRef.current = tray
@@ -141,6 +143,7 @@ export default function App() {
       })
       setImportState(null)
       if (incoming.length === 0) return
+      savePhotos(incoming) // survive reloads — blobs to IndexedDB, fire-and-forget
       setPhotos((prev) => {
         const next = new Map(prev)
         for (const p of incoming) next.set(p.id, p)
@@ -150,6 +153,113 @@ export default function App() {
     },
     [perSlide, recompose],
   )
+
+  // Restore the previous session, if any: photos come back from IndexedDB
+  // with previews re-decoded natively; the arrangement snapshot follows.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const session = await loadSession()
+      if (!session || cancelled) {
+        setRestoring(false)
+        return
+      }
+      const { workspace, photos: stored } = session
+      const map = new Map()
+      let maxId = 0
+      setImportState({ done: 0, total: stored.length })
+      let n = 0
+      for (const rec of stored) {
+        try {
+          const scale = Math.min(1, 480 / Math.max(rec.width, rec.height))
+          const previewBitmap = await createImageBitmap(rec.blob, {
+            resizeWidth: Math.max(1, Math.round(rec.width * scale)),
+            resizeHeight: Math.max(1, Math.round(rec.height * scale)),
+            resizeQuality: 'medium',
+          })
+          map.set(rec.id, { ...rec, previewBitmap })
+        } catch {
+          // a record that no longer decodes just drops out
+        }
+        maxId = Math.max(maxId, rec.id)
+        if (++n % 8 === 0 && !cancelled) setImportState({ done: n, total: stored.length })
+      }
+      if (cancelled) return
+      bumpIdCounter(maxId)
+      for (const s of workspace.slides ?? []) {
+        const m = /^s(\d+)$/.exec(s.key)
+        if (m) slideKeyCounter = Math.max(slideKeyCounter, Number(m[1]) + 1)
+      }
+      const restoredSlides = (workspace.slides ?? [])
+        .map((s) => ({ ...s, photoIds: s.photoIds.filter((id) => map.has(id)) }))
+        .filter((s) => s.photoIds.length > 0)
+      setPhotos(map)
+      setSlides(restoredSlides)
+      setTray((workspace.tray ?? []).filter((id) => map.has(id)))
+      setPerSlide(workspace.perSlide ?? 'auto')
+      setGutter(workspace.gutter ?? 8)
+      setBgMode(workspace.bgMode ?? 'dark')
+      setLook(workspace.look ?? 'auto')
+      setTilt(workspace.tilt ?? 0)
+      setCornerRadius(workspace.cornerRadius ?? 0)
+      setAspect(workspace.aspect ?? '4:5')
+      setBorderW(workspace.borderW ?? 0)
+      setBorderColor(workspace.borderColor ?? '#ffffff')
+      setMeshSeams(new Set(workspace.meshSeams ?? []))
+      setSizeBoosts(new Map(workspace.sizeBoosts ?? []))
+      setSlideTemplates(new Map(workspace.slideTemplates ?? []))
+      setCaptions(new Map(workspace.captions ?? []))
+      setImportState(null)
+      setRestoring(false)
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Debounced workspace snapshot — every meaningful change survives a reload.
+  useEffect(() => {
+    if (restoring || photos.size === 0) return
+    const t = setTimeout(() => {
+      saveWorkspace({
+        slides,
+        tray,
+        perSlide,
+        gutter,
+        bgMode,
+        look,
+        tilt,
+        cornerRadius,
+        aspect,
+        borderW,
+        borderColor,
+        meshSeams: [...meshSeams],
+        sizeBoosts: [...sizeBoosts],
+        slideTemplates: [...slideTemplates],
+        captions: [...captions],
+        savedAt: Date.now(),
+      })
+    }, 800)
+    return () => clearTimeout(t)
+  }, [restoring, photos, slides, tray, perSlide, gutter, bgMode, look, tilt, cornerRadius, aspect, borderW, borderColor, meshSeams, sizeBoosts, slideTemplates, captions])
+
+  // Start over: wipe the stored session and the workspace together.
+  const startOver = () => {
+    if (!window.confirm('Clear every photo and start over?')) return
+    haptics.warning()
+    clearSession()
+    setPhotos(new Map())
+    setSlides([])
+    setTray([])
+    setMeshSeams(new Set())
+    setSizeBoosts(new Map())
+    setSlideTemplates(new Map())
+    setCaptions(new Map())
+    setNotice(null)
+    setSkipped([])
+    setOptionsOpen(false)
+  }
 
   // Esc closes the options popover and the size slider.
   useEffect(() => {
@@ -418,6 +528,7 @@ export default function App() {
     const removed = slides[i]
     if (!removed) return
     haptics.warning()
+    deletePhotos(removed.photoIds) // prune the stored blobs too
     setSlides((prev) => prev.filter((_, j) => j !== i))
     if (removed.photoIds.length) {
       setPhotos((prev) => {
@@ -1085,6 +1196,12 @@ export default function App() {
                   </button>
                 ))}
               </div>
+            </div>
+            <div className="control">
+              <span className="control-label">Session</span>
+              <button className="chip chip-danger" onClick={startOver}>
+                Start over
+              </button>
             </div>
             <div className="control">
               <span className="control-label">Mesh</span>

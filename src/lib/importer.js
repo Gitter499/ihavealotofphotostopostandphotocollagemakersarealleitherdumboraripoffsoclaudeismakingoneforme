@@ -7,6 +7,11 @@
 
 let nextId = 1
 
+// a restored session's photos keep their ids — new imports start above them
+export function bumpIdCounter(min) {
+  if (min >= nextId) nextId = min + 1
+}
+
 function makeWorker() {
   return new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
 }
