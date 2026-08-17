@@ -11,7 +11,7 @@ import {
   harmonizeColors,
   adjustGroupSize,
 } from '../src/lib/grouping.js'
-import { filterFor } from '../src/lib/filters.js'
+import { matrixFor, applyMatrix } from '../src/lib/filters.js'
 import { computeLayout, cropLoss, MAX_CROP_LOSS } from '../src/lib/layout.js'
 import { mulberry32 } from '../src/lib/rng.js'
 
@@ -281,20 +281,39 @@ test('washed-out photos do not drive colour swaps', () => {
   ])
 })
 
-// ---------- automatic filters ----------
+// ---------- automatic filters (colour-matrix engine, Safari-safe) ----------
 
-test('filterFor: Off is a hard guard, Auto adapts to the photo', () => {
-  assert.equal(filterFor({ luma: 0.2, contrast: 0.1 }, 'off'), null)
-  const dark = filterFor({ luma: 0.2, contrast: 0.5 }, 'auto')
-  const bright = filterFor({ luma: 0.85, contrast: 0.5 }, 'auto')
-  const db = Number(dark.match(/brightness\(([\d.]+)\)/)[1])
-  const bb = Number(bright.match(/brightness\(([\d.]+)\)/)[1])
-  assert.ok(db > 1, `dark photo should be lifted, got brightness ${db}`)
-  assert.ok(bb < 1, `bright photo should be pulled down, got brightness ${bb}`)
-  const flat = filterFor({ luma: 0.5, contrast: 0.1 }, 'auto')
-  assert.match(flat, /contrast\(1\.1/)
-  assert.match(filterFor({}, 'noir'), /grayscale\(1\)/)
-  assert.match(filterFor({}, 'film'), /sepia/)
+// run one RGB pixel through a look's matrix
+const runPixel = (photo, look, rgb) => {
+  const m = matrixFor(photo, look)
+  if (!m) return null
+  const data = new Uint8ClampedArray([...rgb, 255])
+  applyMatrix(data, m)
+  return [data[0], data[1], data[2]]
+}
+
+test('filters: Off is a hard guard, Auto adapts to the photo', () => {
+  assert.equal(matrixFor({ luma: 0.2, contrast: 0.1 }, 'off'), null)
+  const grey = [128, 128, 128]
+  const lifted = runPixel({ luma: 0.2, contrast: 0.5 }, 'auto', grey)
+  const pulled = runPixel({ luma: 0.85, contrast: 0.5 }, 'auto', grey)
+  assert.ok(lifted[0] > 128, `dark photo should be lifted, got ${lifted}`)
+  assert.ok(pulled[0] < 128, `bright photo should be pulled down, got ${pulled}`)
+})
+
+test('filters: Noir is truly neutral, Film warms, identity holds', () => {
+  const colourful = [200, 80, 140]
+  const noir = runPixel({ luma: 0.5, contrast: 0.5 }, 'noir', colourful)
+  assert.ok(Math.abs(noir[0] - noir[1]) <= 1 && Math.abs(noir[1] - noir[2]) <= 1, `noir not neutral: ${noir}`)
+  const film = runPixel({ luma: 0.5, contrast: 0.5 }, 'film', [128, 128, 128])
+  assert.ok(film[0] > film[2], `film should warm (R>B), got ${film}`)
+  const frost = runPixel({ luma: 0.5, contrast: 0.5 }, 'frost', [128, 128, 128])
+  assert.ok(frost[2] >= frost[0], `frost should cool (B≥R), got ${frost}`)
+})
+
+test('filters: a well-exposed photo passes through Auto almost untouched', () => {
+  const out = runPixel({ luma: 0.52, contrast: 0.5 }, 'auto', [128, 128, 128])
+  for (const v of out) assert.ok(Math.abs(v - 128) <= 8, `auto shifted a good photo too far: ${out}`)
 })
 
 // ---------- dynamic (Auto) grouping ----------

@@ -3,11 +3,11 @@
 
 const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3)
 
-const supportsFilter = (ctx) => 'filter' in ctx
-
 // progress < 1 draws the entrance settle: fade + slight grow + a whisper of
 // spin (alternating sign per photo) that rights itself as the photo lands.
-export function drawCover(ctx, img, rect, { progress = 1, filter = null, spin = 0 } = {}) {
+// Filters are pre-baked into the bitmaps (see filters.js) — no ctx.filter,
+// which Safari doesn't support.
+export function drawCover(ctx, img, rect, { progress = 1, spin = 0 } = {}) {
   const iw = img.width
   const ih = img.height
   if (!iw || !ih || rect.w <= 0 || rect.h <= 0) return
@@ -24,11 +24,8 @@ export function drawCover(ctx, img, rect, { progress = 1, filter = null, spin = 
   const sx = (iw - sw) / 2
   const sy = (ih - sh) / 2
 
-  const useFilter = filter && supportsFilter(ctx)
   if (progress >= 1) {
-    if (useFilter) ctx.filter = filter
     ctx.drawImage(img, sx, sy, sw, sh, rect.x, rect.y, rect.w, rect.h)
-    if (useFilter) ctx.filter = 'none'
     return
   }
   const e = easeOutCubic(progress)
@@ -37,7 +34,6 @@ export function drawCover(ctx, img, rect, { progress = 1, filter = null, spin = 
   const dh = rect.h * grow
   ctx.save()
   ctx.globalAlpha = e
-  if (useFilter) ctx.filter = filter
   if (spin) {
     ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2)
     ctx.rotate(spin * (1 - e))
@@ -50,8 +46,7 @@ export function drawCover(ctx, img, rect, { progress = 1, filter = null, spin = 
 
 // slide: { photoIds }, rects aligned with photoIds, images: Map id → drawable.
 // progressOf: optional (index) → 0..1 for the compose animation.
-// filterOf: optional (index) → CSS filter string or null.
-export function drawSlide(ctx, { width, height, bg, photoIds, rects, images, progressOf, filterOf }) {
+export function drawSlide(ctx, { width, height, bg, photoIds, rects, images, progressOf }) {
   ctx.fillStyle = bg
   ctx.fillRect(0, 0, width, height)
   for (let i = 0; i < photoIds.length; i++) {
@@ -62,7 +57,6 @@ export function drawSlide(ctx, { width, height, bg, photoIds, rects, images, pro
     if (p <= 0) continue
     drawCover(ctx, img, rect, {
       progress: p,
-      filter: filterOf ? filterOf(i) : null,
       spin: p < 1 ? (i % 2 ? 1 : -1) * 0.05 : 0,
     })
   }

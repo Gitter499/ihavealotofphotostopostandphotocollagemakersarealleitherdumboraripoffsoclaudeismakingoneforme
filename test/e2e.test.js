@@ -215,6 +215,14 @@ try {
   // filter bubble strip: Off must actually change the rendered pixels back
   const bubbleCount = await page.locator('.filterbar .bubble').count()
   assert.ok(bubbleCount >= 7, `expected ≥7 filter bubbles, got ${bubbleCount}`)
+  // every bubble previews a DIFFERENT treatment of the same photo
+  const thumbs = await page.evaluate(() =>
+    [...document.querySelectorAll('.bubble-thumb')].map((c) => c.toDataURL()),
+  )
+  assert.ok(
+    new Set(thumbs).size >= bubbleCount - 1,
+    `bubble thumbnails look identical (${new Set(thumbs).size} distinct of ${thumbs.length})`,
+  )
   const withFilter = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
   await page.locator('[data-look="off"]').click()
   await page.waitForTimeout(300)

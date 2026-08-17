@@ -10,7 +10,7 @@ import {
 } from './lib/grouping.js'
 import { computeLayout } from './lib/layout.js'
 import { averageColor, ambientFrom } from './lib/colors.js'
-import { LOOKS, filterFor } from './lib/filters.js'
+import { LOOKS, matrixFor, applyMatrix, filteredBitmap } from './lib/filters.js'
 import { fireConfetti } from './lib/confetti.js'
 import { exportAllAsZip, renderSlideBlob, slideFileName, saveBlob } from './lib/exportZip.js'
 import { randomSeed } from './lib/rng.js'
@@ -160,10 +160,43 @@ export default function App() {
   const slidesRef = useRef(slides)
   slidesRef.current = slides
 
-  const slideFilters = useMemo(
-    () => slides.map((s) => s.photoIds.map((id) => filterFor(photos.get(id), look))),
-    [slides, photos, look],
-  )
+  // Filtered preview bitmaps for the active look. Built off the originals
+  // with colour-matrix math (works everywhere, unlike ctx.filter) and cached
+  // per photo+look; null means "draw the originals" (look = Off).
+  const filterCache = useRef(new Map())
+  const [lookImages, setLookImages] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    if (look === 'off' || photos.size === 0) {
+      setLookImages(null)
+      return
+    }
+    ;(async () => {
+      const cache = filterCache.current
+      for (const key of [...cache.keys()]) {
+        if (!key.endsWith(`:${look}`)) cache.delete(key)
+      }
+      const map = new Map()
+      let n = 0
+      for (const p of photos.values()) {
+        const key = `${p.id}:${look}`
+        let bmp = cache.get(key)
+        if (!bmp && p.previewBitmap) {
+          bmp = await filteredBitmap(p.previewBitmap, matrixFor(p, look))
+          cache.set(key, bmp)
+        }
+        if (bmp) map.set(p.id, bmp)
+        if (++n % 12 === 0) {
+          if (cancelled) return
+          await new Promise((r) => setTimeout(r)) // keep the main thread breathing
+        }
+      }
+      if (!cancelled) setLookImages(map)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [photos, look])
 
   // Once photos exist, the ambient field takes its light from them.
   const ambientColors = useMemo(() => {
@@ -554,7 +587,7 @@ export default function App() {
                     canvasW={canvasW}
                     canvasH={canvasH}
                     bg={slideBgs[i]}
-                    filters={slideFilters[i]}
+                    imagesOverride={lookImages}
                     animKey={`${slide.key}:${slide.seed}:${slide.photoIds.join(',')}:${aspect}:${gutter}:${(slide.swaps ?? []).length}`}
                     onPhotoPointerDown={(e, photoId) => startPhotoDrag(e, slide.key, photoId)}
                   />
@@ -705,19 +738,23 @@ function BubbleThumb({ photo, lookKey }) {
     const size = 104
     canvas.width = size
     canvas.height = size
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
     const bmp = photo?.previewBitmap
     if (!bmp) {
       ctx.fillStyle = '#3a3a44'
       ctx.fillRect(0, 0, size, size)
       return
     }
-    const filter = filterFor(photo, lookKey)
-    if (filter && 'filter' in ctx) ctx.filter = filter
     const s = Math.max(size / bmp.width, size / bmp.height)
     const sw = size / s
     const sh = size / s
     ctx.drawImage(bmp, (bmp.width - sw) / 2, (bmp.height - sh) / 2, sw, sh, 0, 0, size, size)
+    const m = matrixFor(photo, lookKey)
+    if (m) {
+      const imageData = ctx.getImageData(0, 0, size, size)
+      applyMatrix(imageData.data, m)
+      ctx.putImageData(imageData, 0, 0)
+    }
   }, [photo, lookKey])
   return <canvas ref={ref} className="bubble-thumb" aria-hidden="true" />
 }

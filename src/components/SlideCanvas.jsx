@@ -10,7 +10,7 @@ const MORPH_MS = 420
 //    (shuffle, gutter, aspect changes) — FLIP on canvas
 //  - static: plain redraw (filter/background changes)
 // All motion collapses to a static draw under prefers-reduced-motion.
-export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, bg, filters, animKey, onPhotoPointerDown }) {
+export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, bg, imagesOverride, animKey, onPhotoPointerDown }) {
   const ref = useRef(null)
   const lastAnimKey = useRef(null)
   const shownRects = useRef(null) // Map id → rect currently on screen
@@ -26,12 +26,12 @@ export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, b
     const images = new Map()
     for (const id of slide.photoIds) {
       const p = photos.get(id)
-      if (p?.previewBitmap) images.set(id, p.previewBitmap)
+      const bmp = imagesOverride?.get(id) ?? p?.previewBitmap
+      if (bmp) images.set(id, bmp)
     }
-    const filterOf = filters ? (i) => filters[i] : null
     const draw = (rects, progressOf) => {
       ctx.setTransform(scale, 0, 0, scale, 0, 0)
-      drawSlide(ctx, { width: canvasW, height: canvasH, bg, photoIds: slide.photoIds, rects, images, progressOf, filterOf })
+      drawSlide(ctx, { width: canvasW, height: canvasH, bg, photoIds: slide.photoIds, rects, images, progressOf })
       // remember what is actually on screen so an interrupted morph
       // continues from where it is instead of jumping
       shownRects.current = new Map(slide.photoIds.map((id, i) => [id, rects[i]]))
@@ -74,7 +74,7 @@ export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, b
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [slide, layout, photos, canvasW, canvasH, bg, filters, animKey])
+  }, [slide, layout, photos, canvasW, canvasH, bg, imagesOverride, animKey])
 
   const handlePointerDown = (e) => {
     if (!onPhotoPointerDown) return
