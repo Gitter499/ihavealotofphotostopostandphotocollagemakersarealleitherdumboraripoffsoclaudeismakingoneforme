@@ -107,6 +107,23 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* app-like surface: Safari must never start a blue text/element selection
+   mid-drag — only real text fields stay selectable */
+.app {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+canvas {
+  -webkit-touch-callout: none;
+}
+
 /* ---------- ambient field — what the glass refracts ---------- */
 
 .ambient {
@@ -247,19 +264,6 @@ body {
   color: var(--label-primary);
 }
 
-/* quiet corner chip for the photo/slide tally */
-.stats-corner {
-  position: fixed;
-  left: calc(var(--space-4) + env(safe-area-inset-left));
-  bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
-  z-index: 40;
-  color: var(--label-secondary);
-  font-size: var(--text-caption1);
-  white-space: nowrap;
-  padding: 6px 12px;
-  border-radius: var(--radius-full);
-}
-
 /* ---------- bottom cluster: filter bubbles + action dock ---------- */
 
 .bottom-cluster {
@@ -276,13 +280,43 @@ body {
   transition: opacity var(--duration-fast) var(--ease-out);
 }
 
+.dock-row {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+}
+
 .dock {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: var(--space-1);
   padding: 6px;
   border-radius: var(--radius-full);
   max-width: 100%;
+}
+
+/* the tally lobe of the “p” — a slimmer capsule emerging from the dock */
+.dock-stats {
+  display: inline-block;
+  line-height: 38px;
+  height: 40px;
+  margin-right: -26px;
+  padding: 0 34px 0 16px;
+  border-radius: var(--radius-full);
+  color: var(--label-secondary);
+  font-size: var(--text-caption1);
+  white-space: nowrap;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 640px) {
+  .cw {
+    display: none; /* phones read “30 · 5 · 2” — the words stay for wider screens */
+  }
 }
 
 /* mid-drag the dock steps aside — faded, and drops pass through to
@@ -1562,11 +1596,6 @@ body[data-dragging='1'] .mesh-link {
 
   .topbar {
     margin-top: calc(var(--space-4) + env(safe-area-inset-top));
-  }
-
-  /* keep the tally clear of the dock, which owns the bottom edge on phones */
-  .stats-corner {
-    bottom: calc(92px + env(safe-area-inset-bottom));
   }
 
   input[type='range'] {

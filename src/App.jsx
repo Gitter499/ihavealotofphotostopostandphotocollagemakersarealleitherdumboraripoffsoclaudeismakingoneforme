@@ -1322,20 +1322,28 @@ export default function App() {
       )}
 
       {hasPhotos && (
-        <div className="counts stats-corner glass-thin" aria-live="polite">
-          {photos.size} photos · {slides.length} slides
-          {tray.length > 0 ? ` · ${tray.length} aside` : ''}
-        </div>
-      )}
-
-      {hasPhotos && (
         <div className="bottom-cluster">
           {remixNote && (
             <div className="remix-toast glass-thin" role="status" key={remixNote.at}>
               {remixNote.label}
             </div>
           )}
-          <nav className="dock glass-thick" aria-label="Actions">
+          <div className="dock-row">
+            <span className="counts dock-stats glass-thick" aria-live="polite">
+              {photos.size}
+              <span className="cw"> photos</span>
+              {' · '}
+              {slides.length}
+              <span className="cw"> slides</span>
+              {tray.length > 0 && (
+                <>
+                  {' · '}
+                  {tray.length}
+                  <span className="cw"> aside</span>
+                </>
+              )}
+            </span>
+            <nav className="dock glass-thick" aria-label="Actions">
             <button
               className="dock-btn"
               onClick={() => fileInputRef.current?.click()}
@@ -1384,6 +1392,7 @@ export default function App() {
               )}
             </button>
           </nav>
+          </div>
         </div>
       )}
 

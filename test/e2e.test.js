@@ -747,17 +747,16 @@ try {
   assert.match(await page.locator('.remix-toast').textContent(), /^Remixed/, 'R should trigger a remix')
   console.log('  ok  keyboard shortcuts fire (R = remix)')
 
-  // phone width: the stats chip must sit clear of the dock, not under it
+  // phone width: the tally is fused into the dock — one “p”-shaped bar
   await page.setViewportSize({ width: 390, height: 844 })
   await page.waitForTimeout(400)
-  const statsBox = await page.locator('.stats-corner').boundingBox()
+  const countsBox = await page.locator('.counts').boundingBox()
   const dockBox = await page.locator('.dock').boundingBox()
-  const overlap =
-    statsBox.x < dockBox.x + dockBox.width &&
-    statsBox.x + statsBox.width > dockBox.x &&
-    statsBox.y < dockBox.y + dockBox.height &&
-    statsBox.y + statsBox.height > dockBox.y
-  assert.ok(!overlap, `stats chip overlaps the dock on mobile (${JSON.stringify({ statsBox, dockBox })})`)
+  assert.ok(
+    countsBox && Math.abs(countsBox.y + countsBox.height / 2 - (dockBox.y + dockBox.height / 2)) < 16,
+    `the tally should ride fused to the dock (${JSON.stringify({ countsBox, dockBox })})`,
+  )
+  assert.ok(countsBox.x >= 0 && dockBox.x + dockBox.width <= 391, 'the fused bar must fit the phone width')
 
   // phone width declutters: slide actions collapse behind one ⋯ button that
   // opens a bottom action sheet, and editors anchor to the thumb zone
@@ -786,7 +785,7 @@ try {
 
   await page.setViewportSize({ width: 1280, height: 720 })
   await page.waitForTimeout(300)
-  console.log('  ok  stats chip clears the dock at phone width')
+  console.log('  ok  tally rides fused to the dock at phone width')
 
   // 200-photo stress: import must complete and stay responsive
   const many = []
