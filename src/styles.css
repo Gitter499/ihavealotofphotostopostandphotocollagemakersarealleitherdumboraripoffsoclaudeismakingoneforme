@@ -196,7 +196,7 @@ body {
   flex-direction: column;
   min-height: 100vh;
   min-height: 100dvh;
-  padding: 0 max(var(--space-4), env(safe-area-inset-left)) calc(120px + env(safe-area-inset-bottom))
+  padding: 0 max(var(--space-4), env(safe-area-inset-left)) calc(210px + env(safe-area-inset-bottom))
     max(var(--space-4), env(safe-area-inset-right));
 }
 
@@ -245,20 +245,129 @@ body {
   white-space: nowrap;
 }
 
-/* ---------- floating action dock (iOS 26 tab bar idiom) ---------- */
+/* ---------- bottom cluster: filter bubbles + action dock ---------- */
 
-.dock {
+.bottom-cluster {
   position: fixed;
   bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   z-index: 50;
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: calc(100vw - var(--space-6));
+}
+
+.dock {
+  display: flex;
   align-items: center;
   gap: var(--space-1);
   padding: 6px;
   border-radius: var(--radius-full);
-  max-width: calc(100vw - var(--space-6));
+  max-width: 100%;
+}
+
+/* the filter strip — swipeable row of preview bubbles */
+.filterbar {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  border-radius: var(--radius-2xl);
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.filterbar::-webkit-scrollbar {
+  display: none;
+}
+
+.bubble {
+  appearance: none;
+  border: none;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.bubble-thumb {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 3px 10px rgba(0, 0, 0, 0.45);
+  border: 2px solid transparent;
+  transition:
+    transform var(--duration-fast) var(--ease-spring),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.bubble:hover .bubble-thumb {
+  transform: translateY(-3px);
+}
+
+.bubble:active .bubble-thumb {
+  transform: scale(0.92);
+}
+
+.bubble.active .bubble-thumb {
+  transform: scale(1.14);
+  border-color: var(--system-blue);
+}
+
+.bubble-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--label-secondary);
+  letter-spacing: 0.02em;
+}
+
+.bubble.active .bubble-label {
+  color: var(--label-primary);
+}
+
+.bubble-float {
+  display: block;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .bubble {
+    animation: bubble-in 480ms var(--ease-spring) backwards;
+    animation-delay: calc(var(--i) * 55ms);
+  }
+
+  /* idle bob lives on an inner wrapper so the click target itself stays put */
+  .bubble-float {
+    animation: bubble-bob 3.8s ease-in-out calc(1s + var(--i) * 350ms) infinite alternate;
+  }
+
+  /* hold still while the user is aiming */
+  .filterbar:hover .bubble-float,
+  .filterbar:focus-within .bubble-float {
+    animation-play-state: paused;
+  }
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.55);
+  }
+}
+
+@keyframes bubble-bob {
+  to {
+    transform: translateY(-3px);
+  }
 }
 
 .dock-btn {

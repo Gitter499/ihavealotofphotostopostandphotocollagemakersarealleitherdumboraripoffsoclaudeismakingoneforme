@@ -197,13 +197,15 @@ try {
   await page.locator('input[type="range"]').first().fill('6')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
 
-  // filters: Off must actually change the rendered pixels back
+  // filter bubble strip: Off must actually change the rendered pixels back
+  const bubbleCount = await page.locator('.filterbar .bubble').count()
+  assert.ok(bubbleCount >= 7, `expected ≥7 filter bubbles, got ${bubbleCount}`)
   const withFilter = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
-  await page.getByRole('button', { name: 'Off', exact: true }).click()
+  await page.locator('[data-look="off"]').click()
   await page.waitForTimeout(300)
   const withoutFilter = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
   assert.notEqual(withFilter, withoutFilter, 'Filter Off did not change the render')
-  await page.getByRole('button', { name: 'Noir' }).click()
+  await page.locator('[data-look="noir"]').click()
   await page.waitForTimeout(300)
   const noir = await page.evaluate(() => {
     const c = document.querySelector('.slide-canvas')
@@ -215,8 +217,8 @@ try {
     return colored
   })
   assert.equal(noir, 0, `Noir left ${noir} coloured samples`)
-  await page.locator('.segmented').nth(0).getByRole('button', { name: 'Auto' }).click()
-  console.log('  ok  filters render (Auto default, Off guard, Noir desaturates)')
+  await page.locator('[data-look="auto"]').click()
+  console.log('  ok  filter bubbles render (Auto default, Off guard, Noir desaturates)')
 
   // Auto chip returns to dynamic grouping
   await page.locator('button.chip', { hasText: 'Auto' }).click()

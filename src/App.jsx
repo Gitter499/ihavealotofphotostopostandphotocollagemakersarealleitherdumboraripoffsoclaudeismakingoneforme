@@ -392,16 +392,6 @@ export default function App() {
               <input type="range" min="0" max="24" value={gutter} onChange={(e) => setGutter(Number(e.target.value))} />
             </label>
             <div className="control">
-              <span className="control-label">Filter</span>
-              <div className="segmented">
-                {LOOKS.map((l) => (
-                  <button key={l.key} className={look === l.key ? 'active' : ''} onClick={() => setLook(l.key)}>
-                    {l.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="control">
               <span className="control-label">Background</span>
               <div className="swatches">
                 {BG_SWATCHES.map((s) => (
@@ -532,30 +522,83 @@ export default function App() {
       )}
 
       {hasPhotos && (
-        <nav className="dock glass-thick" aria-label="Actions">
-          <button className="dock-btn" onClick={() => fileInputRef.current?.click()} disabled={busyImporting}>
-            Add photos
-          </button>
-          <button className="dock-btn" onClick={shuffleAll} disabled={busyImporting}>
-            Shuffle all
-          </button>
-          <button
-            className="dock-btn dock-btn-primary"
-            onClick={downloadAll}
-            disabled={busyImporting || !!exportState}
-          >
-            {exportState
-              ? exportState.done < exportState.total
-                ? `Rendering ${exportState.done + 1}/${exportState.total}…`
-                : 'Zipping…'
-              : 'Download all'}
-          </button>
-        </nav>
+        <div className="bottom-cluster">
+          <FilterBar photo={photos.values().next().value} look={look} setLook={setLook} />
+          <nav className="dock glass-thick" aria-label="Actions">
+            <button className="dock-btn" onClick={() => fileInputRef.current?.click()} disabled={busyImporting}>
+              Add photos
+            </button>
+            <button className="dock-btn" onClick={shuffleAll} disabled={busyImporting}>
+              Shuffle all
+            </button>
+            <button
+              className="dock-btn dock-btn-primary"
+              onClick={downloadAll}
+              disabled={busyImporting || !!exportState}
+            >
+              {exportState
+                ? exportState.done < exportState.total
+                  ? `Rendering ${exportState.done + 1}/${exportState.total}…`
+                  : 'Zipping…'
+                : 'Download all'}
+            </button>
+          </nav>
+        </div>
       )}
 
       {drag && <DragGhost drag={drag} photo={photos.get(drag.photoId)} />}
     </div>
   )
+}
+
+// Instagram-style filter picker: a strip of circular bubbles, each showing a
+// real photo from the dump with that look applied. Pop-in, idle bob, and
+// selection scale are pure CSS, all gated behind prefers-reduced-motion.
+function FilterBar({ photo, look, setLook }) {
+  return (
+    <div className="filterbar glass-thick" role="radiogroup" aria-label="Filter">
+      {LOOKS.map((l, i) => (
+        <button
+          key={l.key}
+          data-look={l.key}
+          role="radio"
+          aria-checked={look === l.key}
+          className={`bubble ${look === l.key ? 'active' : ''}`}
+          style={{ '--i': i }}
+          onClick={() => setLook(l.key)}
+        >
+          <span className="bubble-float">
+            <BubbleThumb photo={photo} lookKey={l.key} />
+          </span>
+          <span className="bubble-label">{l.label}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function BubbleThumb({ photo, lookKey }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const canvas = ref.current
+    const size = 104
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')
+    const bmp = photo?.previewBitmap
+    if (!bmp) {
+      ctx.fillStyle = '#3a3a44'
+      ctx.fillRect(0, 0, size, size)
+      return
+    }
+    const filter = filterFor(photo, lookKey)
+    if (filter && 'filter' in ctx) ctx.filter = filter
+    const s = Math.max(size / bmp.width, size / bmp.height)
+    const sw = size / s
+    const sh = size / s
+    ctx.drawImage(bmp, (bmp.width - sw) / 2, (bmp.height - sh) / 2, sw, sh, 0, 0, size, size)
+  }, [photo, lookKey])
+  return <canvas ref={ref} className="bubble-thumb" aria-hidden="true" />
 }
 
 // One icon voice: 16px grid, 1.8 stroke, round caps — no mixed glyph sets.
