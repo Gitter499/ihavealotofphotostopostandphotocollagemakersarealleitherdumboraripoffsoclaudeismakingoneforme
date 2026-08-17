@@ -21,6 +21,7 @@ Everything runs in your browser. Photos never leave your device.
 - Tilt, rounded corners, gutter width, 4:5 or 1:1.
 - Mesh mode: a photo can run across two slides, so the carousel swipes as one continuous strip.
 - Drag photos between slides or within one. Add, delete, reorder slides. Set any slide's photo count.
+- A playground shelf under the slides: park photos there while you experiment, drag them back when you're sure. Regroup and remix leave parked photos alone.
 - Exports numbered 1440×1800 JPEGs in a zip, ready to post in order.
 
 ## Run it

@@ -58,15 +58,19 @@ export default function App() {
   const [exportState, setExportState] = useState(null) // {done, total}
   const [optionsOpen, setOptionsOpen] = useState(false)
   const [drag, setDrag] = useState(null) // {photoId, fromKey, x, y, overKey}
+  const [tray, setTray] = useState([]) // playground: photo ids set aside from every slide
   const fileInputRef = useRef(null)
   const dragRef = useRef(null)
+  const trayRef = useRef(tray)
+  trayRef.current = tray
 
   const canvasW = 1080
   const canvasH = aspect === '1:1' ? 1080 : 1350
   const margin = gutter * 2 // gutter 8 → margin 16 (spec defaults); gutter 0 → full bleed
 
   const recompose = useCallback((photosMap, per) => {
-    const sorted = sortPhotos([...photosMap.values()])
+    // photos resting in the playground sit out of every regroup
+    const sorted = sortPhotos([...photosMap.values()].filter((p) => !trayRef.current.includes(p.id)))
     const sortedIds = sorted.map((p) => p.id)
     const { groups, notice } =
       per === 'auto'
@@ -291,8 +295,9 @@ export default function App() {
   const lastLens = useRef(null)
   const [remixNote, setRemixNote] = useState(null)
   const remixAll = () => {
-    if (photos.size === 0) return
-    const { key, label, groups } = remixPlan([...photos.values()], (id) => photos.get(id), {
+    const pool = [...photos.values()].filter((p) => !tray.includes(p.id))
+    if (pool.length === 0) return
+    const { key, label, groups } = remixPlan(pool, (id) => photos.get(id), {
       avoid: lastLens.current,
     })
     lastLens.current = key
@@ -392,6 +397,50 @@ export default function App() {
     })
   }
 
+  // ---- playground: a shelf where photos sit out of every slide ----
+  const TRAY_KEY = '__tray__'
+
+  const movePhotoToTray = (photoId, fromKey) => {
+    setSlides((prev) =>
+      prev
+        .map((s) =>
+          s.key === fromKey
+            ? { ...s, photoIds: s.photoIds.filter((id) => id !== photoId), seed: randomSeed() }
+            : s,
+        )
+        .filter((s) => s.photoIds.length > 0 || s.key !== fromKey),
+    )
+    setTray((prev) => (prev.includes(photoId) ? prev : [...prev, photoId]))
+  }
+
+  const movePhotoFromTray = (photoId, toKey) => {
+    setTray((prev) => prev.filter((id) => id !== photoId))
+    setSlides((prev) =>
+      prev.map((s) => (s.key === toKey ? { ...s, photoIds: [...s.photoIds, photoId], seed: randomSeed() } : s)),
+    )
+  }
+
+  // hand every parked photo back, each to whichever slide is emptiest
+  const returnAllFromTray = () => {
+    const parked = trayRef.current
+    if (parked.length === 0) return
+    setSlides((prev) => {
+      const next = prev.length
+        ? prev.map((s) => ({ ...s, photoIds: [...s.photoIds] }))
+        : [{ key: `s${slideKeyCounter++}`, photoIds: [], seed: randomSeed() }]
+      for (const id of parked) {
+        let best = 0
+        for (let i = 1; i < next.length; i++) {
+          if (next[i].photoIds.length < next[best].photoIds.length) best = i
+        }
+        next[best].photoIds.push(id)
+        next[best].seed = randomSeed()
+      }
+      return next
+    })
+    setTray([])
+  }
+
   // ---- photo drag between slides (pointer-based, works with touch) ----
   const startPhotoDrag = (e, slideKey, photoId) => {
     if (drag || exportState) return
@@ -419,7 +468,7 @@ export default function App() {
       }
       const el = document.elementFromPoint(ev.clientX, ev.clientY)
       const card = el?.closest?.('[data-slide-key]')
-      const overKey = card?.dataset.slideKey ?? null
+      const overKey = el?.closest?.('.playground') ? TRAY_KEY : (card?.dataset.slideKey ?? null)
       setDrag((d) => (d ? { ...d, x: ev.clientX, y: ev.clientY, overKey } : d))
     }
     const onUp = (ev) => {
@@ -427,10 +476,16 @@ export default function App() {
         const el = document.elementFromPoint(ev.clientX, ev.clientY)
         const card = el?.closest?.('[data-slide-key]')
         const toKey = card?.dataset.slideKey
+        const overTray = !!el?.closest?.('.playground')
+        const fromTray = trayRef.current.includes(photoId)
         // a seam bridge can be drawn on its neighbour's canvas — resolve the
         // slide that actually owns the photo before deciding move vs swap
         const ownerKey = slidesRef.current.find((s) => s.photoIds.includes(photoId))?.key ?? slideKey
-        if (toKey && toKey !== ownerKey) {
+        if (overTray) {
+          if (!fromTray) movePhotoToTray(photoId, ownerKey)
+        } else if (fromTray) {
+          if (toKey) movePhotoFromTray(photoId, toKey)
+        } else if (toKey && toKey !== ownerKey) {
           movePhoto(photoId, ownerKey, toKey)
         } else if (toKey === ownerKey) {
           // dropped within the same slide → swap with the photo under the pointer
@@ -755,6 +810,33 @@ export default function App() {
               </button>
             )}
           </div>
+
+          <div
+            className={`playground glass-thin ${
+              drag && drag.overKey === TRAY_KEY && !tray.includes(drag.photoId) ? 'drop-target' : ''
+            }`}
+            data-testid="playground"
+          >
+            <div className="playground-head">
+              <span className="playground-title">Playground</span>
+              {tray.length > 0 && (
+                <button className="chip" onClick={returnAllFromTray} title="Hand every parked photo back to the slides">
+                  Return all
+                </button>
+              )}
+            </div>
+            {tray.length === 0 ? (
+              <p className="playground-hint">
+                Drag photos here to set them aside while you experiment — regroup and remix leave them be.
+              </p>
+            ) : (
+              <div className="playground-shelf">
+                {tray.map((id) => (
+                  <TrayThumb key={id} photo={photos.get(id)} onPointerDown={(e) => startPhotoDrag(e, TRAY_KEY, id)} />
+                ))}
+              </div>
+            )}
+          </div>
         </>
       )}
 
@@ -849,6 +931,7 @@ export default function App() {
       {hasPhotos && (
         <div className="counts stats-corner glass-thin" aria-live="polite">
           {photos.size} photos · {slides.length} slides
+          {tray.length > 0 ? ` · ${tray.length} aside` : ''}
         </div>
       )}
 
@@ -1024,6 +1107,34 @@ function BubbleThumb({ photo, lookKey }) {
     }
   }, [photo, lookKey])
   return <canvas ref={ref} className="bubble-thumb" aria-hidden="true" />
+}
+
+// One parked photo on the playground shelf — sized by its own aspect,
+// draggable back onto any slide.
+function TrayThumb({ photo, onPointerDown }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const canvas = ref.current
+    const bmp = photo?.previewBitmap
+    if (!canvas || !bmp?.width) return
+    const h = 76
+    const w = Math.max(28, Math.round((bmp.width / bmp.height) * h))
+    canvas.width = w * 2
+    canvas.height = h * 2
+    canvas.style.width = `${w}px`
+    canvas.style.height = `${h}px`
+    canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height)
+  }, [photo])
+  // block scroll only while a drag is actually active, same as the slides
+  useEffect(() => {
+    const canvas = ref.current
+    const onTouchMove = (e) => {
+      if (document.body.dataset.dragging === '1') e.preventDefault()
+    }
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false })
+    return () => canvas.removeEventListener('touchmove', onTouchMove)
+  }, [])
+  return <canvas ref={ref} className="tray-thumb" onPointerDown={onPointerDown} />
 }
 
 function DragGhost({ drag, photo }) {
