@@ -27,8 +27,9 @@ so upload order is unambiguous.
    filename, then file order. A photo dump has an implicit narrative;
    chronology preserves it for free.
 2. **Group** — balanced slides of 4–8 photos (target set by a slider,
-   default 6), clamped to Instagram's 20-slide limit, with neighbour-only
-   swaps to mix portrait/landscape per slide without wrecking chronology.
+   default 6), with neighbour-only swaps to mix portrait/landscape per slide
+   without wrecking chronology. Slide count grows with the dump — 30 photos
+   → 5 slides, 100 → 17 — up to Instagram's 20-slide carousel limit.
 3. **Lay out** — recursive binary space partitioning on a 1080×1350 canvas,
    split direction/position weighted by the aspect ratios of the photos
    assigned to each side, then per-node refinement to minimise crop loss.
@@ -59,3 +60,16 @@ photo onto another slide to move it (press-and-hold on touch).
 npm test           # unit tests: sorting, grouping, balancing, BSP geometry
 npm run test:e2e   # headless-browser test: 30 photos → 5 slides → verified zip
 ```
+
+## Agent testing (MCP)
+
+`.mcp.json` configures the [Playwright MCP server](https://github.com/microsoft/playwright-mcp)
+(installed as a dev dependency) so an AI agent working in this repo can
+drive a real browser against the app — navigate, click, drag, fill, take
+screenshots, and inspect them — including coordinate-based vision tools
+(`--caps vision`). Run `npm run build`, serve `dist/`, and point the browser
+tools at it.
+
+The config pins `--executable-path /opt/pw-browsers/chromium` for the
+remote dev container this repo is developed in; on a machine with standard
+Playwright browsers installed, drop that flag.

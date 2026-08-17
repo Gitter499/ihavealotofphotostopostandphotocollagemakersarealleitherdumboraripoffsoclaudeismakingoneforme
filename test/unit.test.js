@@ -47,6 +47,20 @@ test('remainder spreads — no orphan final slide', () => {
   assert.ok(max - min <= 1, `unbalanced: ${sizes}`)
 })
 
+test('slide count scales past 5 — 100 photos at 6 per slide → 17 slides', () => {
+  const { sizes, notice } = planSizes(100, 6)
+  assert.equal(sizes.length, 17)
+  assert.equal(notice, null)
+  assert.equal(sizes.reduce((a, b) => a + b, 0), 100)
+})
+
+test('120 photos at 6 per slide → exactly the 20-slide cap, nothing dropped', () => {
+  const { sizes, notice, included } = planSizes(120, 6)
+  assert.equal(sizes.length, 20)
+  assert.equal(included, 120)
+  assert.equal(notice, null)
+})
+
 test('clamps to 20 slides by raising photos per slide', () => {
   const { sizes, notice, included } = planSizes(130, 5) // would be 26 slides
   assert.equal(sizes.length, 20)

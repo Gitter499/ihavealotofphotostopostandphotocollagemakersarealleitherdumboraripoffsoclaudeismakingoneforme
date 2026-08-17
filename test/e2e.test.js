@@ -177,6 +177,13 @@ try {
   assert.ok(painted > 0.5, `only ${painted} of preview pixels painted`)
   console.log('  ok  slide preview actually painted')
 
+  // more than 5 slides: lower photos-per-slide → 30 photos at 4 → 8 slides
+  await page.locator('input[type="range"]').first().fill('4')
+  await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 8, null, { timeout: 10000 })
+  console.log('  ok  photos-per-slide 4 regroups 30 photos into 8 slides (>5, cap is 20)')
+  await page.locator('input[type="range"]').first().fill('6')
+  await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
+
   // shuffle changes the layout
   const before = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
   await page.locator('.slide-card').first().locator('[aria-label="Shuffle this slide"]').click()
