@@ -39,8 +39,10 @@ so upload order is unambiguous.
    assigned to each side, then per-node refinement to minimise crop loss.
    A photo that would lose more than ~35% of its area to the crop triggers a
    retry with a different seed; the best-scoring attempt wins.
-4. **Export** — offscreen canvas at full 1080×1350 (or 1080×1080), JPEG
-   quality 0.92, zipped with JSZip.
+4. **Export** — offscreen canvas at 1440×1800 (or 1440×1440), the highest
+   resolution Instagram accepts without downscaling, JPEG quality 0.95,
+   zipped with JSZip. Sources are kept at up to 2160px on the long edge so
+   even a full-bleed slot renders from more pixels than it needs.
 
 Imports are decoded, EXIF-read, and downscaled (max 2160px long edge) in a
 Web Worker pool so a 200-photo dump doesn't freeze the tab. Only small
@@ -54,7 +56,8 @@ page load — zero network requests afterwards.
 
 Everything has a working default — the app produces a finished result before
 you touch anything. Shuffle (per-slide and all), photos per slide (Auto or
-a fixed 4–8), gutter
+a fixed 4–8, plus per-slide −/+ steppers that rebalance a boundary photo
+with a neighbouring slide), gutter
 width, background (near-black / off-white / sampled from the photos),
 aspect ratio (4:5 or 1:1), drag a slide header to reorder slides, drag a
 photo onto another slide to move it (press-and-hold on touch).

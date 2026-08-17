@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { importFiles } from './lib/importer.js'
-import { sortPhotos, groupPhotos, groupPhotosAuto, effectiveQualities } from './lib/grouping.js'
+import { sortPhotos, groupPhotos, groupPhotosAuto, effectiveQualities, adjustGroupSize } from './lib/grouping.js'
 import { computeLayout } from './lib/layout.js'
 import { averageColor, ambientFrom } from './lib/colors.js'
 import { LOOKS, filterFor } from './lib/filters.js'
@@ -147,6 +147,19 @@ export default function App() {
   }
   const shuffleAll = () => {
     setSlides((prev) => prev.map((s) => ({ ...s, seed: randomSeed() })))
+  }
+
+  // "−"/"+" on a slide: rebalance a boundary photo with a neighbouring slide
+  const adjustSlide = (i, delta) => {
+    setSlides((prev) => {
+      const groups = prev.map((s) => s.photoIds)
+      const result = adjustGroupSize(groups, i, delta)
+      if (!result) return prev
+      const byRef = new Map(groups.map((g, j) => [g, prev[j]]))
+      return result.map(
+        (g) => byRef.get(g) ?? { key: `s${slideKeyCounter++}`, photoIds: g, seed: randomSeed() },
+      )
+    })
   }
 
   const moveSlide = (from, to) => {
@@ -465,7 +478,25 @@ export default function App() {
                 >
                   <span className="slide-num">{String(i + 1).padStart(2, '0')}</span>
                   <span className="slide-count">
+                    <button
+                      className="icon-btn icon-btn-sm"
+                      onClick={() => adjustSlide(i, -1)}
+                      disabled={slide.photoIds.length <= 1 || slides.length < 2}
+                      aria-label="Fewer photos on this slide"
+                      title="Move a photo to a neighbouring slide"
+                    >
+                      <Glyph d="M3.5 8h9" />
+                    </button>
                     {slide.photoIds.length} {slide.photoIds.length === 1 ? 'photo' : 'photos'}
+                    <button
+                      className="icon-btn icon-btn-sm"
+                      onClick={() => adjustSlide(i, 1)}
+                      disabled={slide.photoIds.length >= 8 || slides.length < 2}
+                      aria-label="More photos on this slide"
+                      title="Pull a photo from a neighbouring slide"
+                    >
+                      <Glyph d="M8 3.5v9M3.5 8h9" />
+                    </button>
                   </span>
                   <span className="slide-actions">
                     <button

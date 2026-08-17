@@ -150,8 +150,9 @@ async function process(id, blob, name, date) {
       height = Math.max(1, Math.round(h0 * scale))
       const oc = new OffscreenCanvas(width, height)
       const ctx = oc.getContext('2d')
+      ctx.imageSmoothingQuality = 'high'
       ctx.drawImage(bmp, 0, 0, width, height)
-      stored = await oc.convertToBlob({ type: 'image/jpeg', quality: 0.9 })
+      stored = await oc.convertToBlob({ type: 'image/jpeg', quality: 0.93 })
     }
     const ps = Math.min(1, PREVIEW_DIM / Math.max(width, height))
     const pw = Math.max(1, Math.round(width * ps))

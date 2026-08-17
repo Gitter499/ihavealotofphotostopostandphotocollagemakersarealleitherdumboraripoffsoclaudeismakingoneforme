@@ -231,6 +231,26 @@ try {
   await page.locator('input[type="range"]').first().fill('6')
   await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
 
+  // per-slide stepper: minus hands a photo to the next slide, totals conserved
+  const countsOf = () =>
+    page.evaluate(() => [...document.querySelectorAll('.slide-count')].map((el) => parseInt(el.textContent, 10)))
+  const stepBefore = await countsOf()
+  await page.locator('[aria-label="Fewer photos on this slide"]').first().click()
+  await page.waitForTimeout(300)
+  const afterMinus = await countsOf()
+  assert.equal(afterMinus[0], stepBefore[0] - 1, 'first slide should shrink')
+  assert.equal(afterMinus[1], stepBefore[1] + 1, 'second slide should grow')
+  assert.equal(
+    afterMinus.reduce((a, b) => a + b, 0),
+    stepBefore.reduce((a, b) => a + b, 0),
+    'no photo may be dropped',
+  )
+  await page.locator('[aria-label="More photos on this slide"]').first().click()
+  await page.waitForTimeout(300)
+  const afterPlus = await countsOf()
+  assert.deepEqual(afterPlus, stepBefore, 'plus should restore the balance')
+  console.log('  ok  per-slide − / + steppers rebalance with the neighbour')
+
   // shuffle changes the layout
   const before = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
   await page.locator('.slide-card').first().locator('[aria-label="Shuffle this slide"]').click()
@@ -253,11 +273,11 @@ try {
   for (const name of names) {
     const buf = Buffer.from(await zip.files[name].async('arraybuffer'))
     const { width, height } = jpegSize(buf)
-    assert.equal(width, 1080, `${name} width`)
-    assert.equal(height, 1350, `${name} height`)
+    assert.equal(width, 1440, `${name} width`)
+    assert.equal(height, 1800, `${name} height`)
     assert.ok(buf.length > 5000, `${name} suspiciously small (${buf.length}B)`)
   }
-  console.log('  ok  zip contains 01–05.jpg, all 1080×1350 JPEGs')
+  console.log('  ok  zip contains 01–05.jpg, all 1440×1800 JPEGs (Instagram max)')
 
   assert.deepEqual(lateRequests, [], `network requests after load: ${lateRequests.join(', ')}`)
   console.log('  ok  zero network requests after page load')
@@ -271,8 +291,8 @@ try {
   const onePath = join(tmp, 'one.jpg')
   await dl2.saveAs(onePath)
   const one = jpegSize(readFileSync(onePath))
-  assert.deepEqual(one, { height: 1080, width: 1080 })
-  console.log('  ok  1:1 aspect exports 1080×1080')
+  assert.deepEqual(one, { height: 1440, width: 1440 })
+  console.log('  ok  1:1 aspect exports 1440×1440')
 
   // 200-photo stress: import must complete and stay responsive
   const many = []

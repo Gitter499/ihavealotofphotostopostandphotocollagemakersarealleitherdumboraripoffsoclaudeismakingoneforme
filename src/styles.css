@@ -793,8 +793,28 @@ input[type='range']::-moz-range-thumb {
 }
 
 .slide-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   color: var(--label-secondary);
   font-size: var(--text-caption1);
+  white-space: nowrap;
+}
+
+.slide-actions .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+
+.icon-btn-sm {
+  width: 26px;
+  height: 26px;
+  font-size: var(--text-caption1);
+}
+
+.icon-btn-sm svg {
+  width: 13px;
+  height: 13px;
 }
 
 .slide-actions {

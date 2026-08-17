@@ -9,6 +9,7 @@ import {
   effectiveQualities,
   groupPhotosAuto,
   harmonizeColors,
+  adjustGroupSize,
 } from '../src/lib/grouping.js'
 import { filterFor } from '../src/lib/filters.js'
 import { computeLayout, cropLoss, MAX_CROP_LOSS } from '../src/lib/layout.js'
@@ -132,6 +133,83 @@ test('groupPhotos returns groups plus excluded tail', () => {
 })
 
 const LAYOUT_OPTS = { canvasW: 1080, canvasH: 1350, margin: 16, gutter: 8, baseSeed: 12345 }
+
+// ---------- per-slide size stepper ----------
+
+test('minus hands the boundary photo to the next slide', () => {
+  const groups = [
+    [1, 2, 3, 4],
+    [5, 6, 7],
+  ]
+  const out = adjustGroupSize(groups, 0, -1)
+  assert.deepEqual(out, [
+    [1, 2, 3],
+    [4, 5, 6, 7],
+  ])
+  assert.equal(out[1] === groups[1], false)
+  assert.equal(groups[0].length, 4, 'input must not be mutated')
+})
+
+test('minus on the last slide gives to the previous slide instead', () => {
+  const out = adjustGroupSize(
+    [
+      [1, 2, 3],
+      [4, 5, 6],
+    ],
+    1,
+    -1,
+  )
+  assert.deepEqual(out, [
+    [1, 2, 3, 4],
+    [5, 6],
+  ])
+})
+
+test('plus pulls the neighbouring boundary photo in', () => {
+  const out = adjustGroupSize(
+    [
+      [1, 2, 3],
+      [4, 5, 6],
+    ],
+    0,
+    1,
+  )
+  assert.deepEqual(out, [
+    [1, 2, 3, 4],
+    [5, 6],
+  ])
+})
+
+test('plus that empties a neighbour removes that slide', () => {
+  const out = adjustGroupSize([[1, 2, 3], [4]], 0, 1)
+  assert.deepEqual(out, [[1, 2, 3, 4]])
+})
+
+test('stepper respects the bounds', () => {
+  assert.equal(adjustGroupSize([[1], [2, 3]], 0, -1), null, 'cannot shrink below one photo')
+  assert.equal(adjustGroupSize([[1, 2, 3, 4, 5, 6, 7, 8], [9]], 0, 1), null, 'cannot grow past eight')
+  assert.equal(adjustGroupSize([[1, 2, 3]], 0, -1), null, 'single slide has no neighbour to give to')
+  const total = (g) => g.flat().length
+  const groups = [
+    [1, 2, 3, 4],
+    [5, 6, 7],
+    [8, 9],
+  ]
+  const out = adjustGroupSize(groups, 1, -1)
+  assert.equal(total(out), total(groups), 'no photo may ever be dropped')
+})
+
+test('minus prefers the neighbour with room', () => {
+  const groups = [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9, 10, 11, 12, 13, 14], // full
+  ]
+  // slide 1 shrinks; next slide is full, so the photo should go backwards
+  const out = adjustGroupSize(groups, 1, -1)
+  assert.deepEqual(out[0], [1, 2, 3, 4])
+  assert.equal(out[2].length, 8)
+})
 
 // ---------- colour coherence ----------
 

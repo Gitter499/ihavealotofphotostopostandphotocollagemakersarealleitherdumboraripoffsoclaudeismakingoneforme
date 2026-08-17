@@ -98,6 +98,54 @@ export function balanceOrientations(groups, aspectOf) {
   return groups
 }
 
+// ---- per-slide size stepper ----
+//
+// Grow or shrink one slide by a photo, rebalancing with a neighbour so no
+// photo is ever dropped: "−" hands this slide's boundary photo to the next
+// slide (or the previous, at the end of the strip); "+" pulls the adjacent
+// boundary photo in. Chronology is preserved because only boundary photos
+// move. Returns a new groups array — untouched groups keep their identity
+// (same reference) so callers can keep their layouts stable — or null when
+// the adjustment isn't possible.
+
+export function adjustGroupSize(groups, i, delta, maxPer = HARD_MAX_PER_SLIDE) {
+  if (i < 0 || i >= groups.length) return null
+  const next = [...groups]
+  if (delta === -1) {
+    if (next[i].length <= 1) return null
+    const canNext = i + 1 < next.length
+    const canPrev = i > 0
+    if (!canNext && !canPrev) return null
+    // prefer a neighbour with room; fall back to the other side
+    const useNext = canNext && (!canPrev || next[i + 1].length < maxPer || next[i - 1].length >= maxPer)
+    if (useNext) {
+      const moved = next[i][next[i].length - 1]
+      next[i] = next[i].slice(0, -1)
+      next[i + 1] = [moved, ...next[i + 1]]
+    } else {
+      const moved = next[i][0]
+      next[i] = next[i].slice(1)
+      next[i - 1] = [...next[i - 1], moved]
+    }
+  } else if (delta === 1) {
+    if (next[i].length >= maxPer) return null
+    if (i + 1 < next.length && next[i + 1].length > 0) {
+      const moved = next[i + 1][0]
+      next[i + 1] = next[i + 1].slice(1)
+      next[i] = [...next[i], moved]
+    } else if (i > 0 && next[i - 1].length > 0) {
+      const moved = next[i - 1][next[i - 1].length - 1]
+      next[i - 1] = next[i - 1].slice(0, -1)
+      next[i] = [moved, ...next[i]]
+    } else {
+      return null
+    }
+  } else {
+    return null
+  }
+  return next.filter((g) => g.length > 0)
+}
+
 // ---- colour coherence (subtle) ----
 //
 // After orientation balancing, a second neighbour-boundary pass swaps photos
