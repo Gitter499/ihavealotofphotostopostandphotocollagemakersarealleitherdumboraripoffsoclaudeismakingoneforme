@@ -22,10 +22,10 @@ const { rects } = computeLayout([1.6, 0.8, 1.2, 1.0], {
   baseSeed: 20260817,
 })
 const gradients = [
-  ['#64d2ff', '#0a84ff'],
-  ['#0a84ff', '#5e5ce6'],
-  ['#5e5ce6', '#bf5af2'],
-  ['#ffd60a', '#ff9f0a'],
+  ['#ffffff', '#c3c7cf'],
+  ['#dfe2e8', '#9aa0ab'],
+  ['#b9bec8', '#787d88'],
+  ['#f4f5f7', '#aeb3bd'],
 ]
 const order = rects
   .map((r, i) => ({ i, area: r.w * r.h }))
@@ -91,7 +91,7 @@ const defs =
         `<linearGradient id="g${i}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient>`,
     )
     .join('') +
-  `<linearGradient id="word" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#64d2ff"/><stop offset="0.55" stop-color="#6aa8ff"/><stop offset="1" stop-color="#bf5af2"/></linearGradient>`
+  `<linearGradient id="word" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="0.38" stop-color="#e9ebef"/><stop offset="0.52" stop-color="#adb2bd"/><stop offset="0.66" stop-color="#d4d7dd"/><stop offset="1" stop-color="#f2f3f6"/></linearGradient><linearGradient id="gloss" x1="0" y1="0" x2="1" y2="0.35"><stop offset="0.42" stop-color="#ffffff" stop-opacity="0"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="0.55"/><stop offset="0.58" stop-color="#ffffff" stop-opacity="0"/></linearGradient>`
 const textX = PAD + markW + GAP - bb.x1
 const textY = (H - wordH) / 2 - bb.y1
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
@@ -99,6 +99,7 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" wid
 <rect width="${W}" height="${H}" rx="28" fill="#0a0a0f"/>
 ${markGroup(markScale, PAD, (H - markH) / 2)}
 <path transform="translate(${textX.toFixed(1)} ${textY.toFixed(1)})" d="${d}" fill="url(#word)"/>
+<path transform="translate(${textX.toFixed(1)} ${textY.toFixed(1)})" d="${d}" fill="url(#gloss)"/>
 </svg>
 `
 mkdirSync(join(root, 'docs'), { recursive: true })

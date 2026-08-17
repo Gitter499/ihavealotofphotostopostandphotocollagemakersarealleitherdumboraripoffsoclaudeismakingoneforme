@@ -14,15 +14,15 @@ const H = 120 // 4:5, the product's canvas
 const aspects = [1.6, 0.8, 1.2, 1.0]
 const { rects } = computeLayout(aspects, { canvasW: W, canvasH: H, margin: 10, gutter: 7, baseSeed: 20260817 })
 
-// glass-era palette: teal → blue → indigo, one warm spark
+// monotone silver palette — value differences carry the composition
 const gradients = [
-  ['#64d2ff', '#0a84ff'],
-  ['#0a84ff', '#5e5ce6'],
-  ['#5e5ce6', '#bf5af2'],
-  ['#ffd60a', '#ff9f0a'],
+  ['#ffffff', '#c3c7cf'],
+  ['#dfe2e8', '#9aa0ab'],
+  ['#b9bec8', '#787d88'],
+  ['#f4f5f7', '#aeb3bd'],
 ]
 
-// the smallest rect gets the warm spark; the rest run cool
+// the smallest rect gets the brightest tile
 const order = rects
   .map((r, i) => ({ i, area: r.w * r.h }))
   .sort((a, b) => a.area - b.area)
