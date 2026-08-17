@@ -1,9 +1,13 @@
-// Regenerates the README screenshots (docs/screen-*.png) from the built app,
-// so they track the real UI. Run after `npm run build`:  npm run screens
+// Regenerates the README screenshots from the built app so they track the
+// real UI. Files are written with content-hashed names and the README's
+// image references are rewritten to match — a fresh URL every time, so
+// GitHub's image cache can never show a stale shot.
+// Run after `npm run build`:  npm run screens
 // Generates its own demo photos, serves dist/, drives headless Chromium.
 // Locally it uses the preinstalled browser at /opt/pw-browsers/chromium; in CI
 // it falls back to playwright's default browser registry.
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { deflateSync } from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -121,10 +125,12 @@ const loadWithPhotos = async (page, count) => {
   await page.waitForTimeout(1400)
 }
 
+const shots = {}
+
 // desktop, default state
 const desktop = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage()
 await loadWithPhotos(desktop, 24)
-await desktop.screenshot({ path: join(docs, 'screen-desktop.png') })
+shots.desktop = await desktop.screenshot()
 
 // desktop, tilt + rounded corners
 await desktop.getByRole('button', { name: 'Options' }).click()
@@ -134,15 +140,32 @@ await desktop.locator('input[type="range"]').nth(3).fill('18')
 await desktop.locator('input[type="range"]').nth(1).fill('12')
 await desktop.keyboard.press('Escape')
 await desktop.waitForTimeout(600)
-await desktop.screenshot({ path: join(docs, 'screen-scrapbook.png') })
+shots.scrapbook = await desktop.screenshot()
 
 // mobile
 const mobile = await (
   await browser.newContext({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 2 })
 ).newPage()
 await loadWithPhotos(mobile, 12)
-await mobile.screenshot({ path: join(docs, 'screen-mobile.png') })
+shots.mobile = await mobile.screenshot()
 
 await browser.close()
 server.close()
-console.log('screenshots written to docs/')
+
+// content-hashed filenames + README rewrite
+for (const f of readdirSync(docs)) {
+  if (/^screen-(desktop|scrapbook|mobile).*\.png$/.test(f)) rmSync(join(docs, f))
+}
+const names = {}
+for (const [k, buf] of Object.entries(shots)) {
+  const h = createHash('sha1').update(buf).digest('hex').slice(0, 8)
+  names[k] = `screen-${k}-${h}.png`
+  writeFileSync(join(docs, names[k]), buf)
+}
+const readmePath = join(root, 'README.md')
+let readme = readFileSync(readmePath, 'utf8')
+for (const k of Object.keys(names)) {
+  readme = readme.replace(new RegExp(`docs/screen-${k}[^)">]*\\.png`, 'g'), `docs/${names[k]}`)
+}
+writeFileSync(readmePath, readme)
+console.log('screenshots:', Object.values(names).join(' '))
