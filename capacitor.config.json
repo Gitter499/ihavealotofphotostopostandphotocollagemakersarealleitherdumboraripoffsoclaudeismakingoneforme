@@ -1,0 +1,12 @@
+{
+  "appId": "app.photogram",
+  "appName": "photogram",
+  "webDir": "dist",
+  "backgroundColor": "#0a0a0f",
+  "ios": {
+    "contentInset": "automatic"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

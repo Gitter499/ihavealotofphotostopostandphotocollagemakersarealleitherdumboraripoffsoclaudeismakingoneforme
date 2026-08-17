@@ -2,3 +2,9 @@ node_modules/
 dist/
 test/tmp/
 *.log
+
+# Capacitor: synced web assets are build output — `npx cap sync` regenerates
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+ios/App/App/public/
+ios/App/App/capacitor.config.json

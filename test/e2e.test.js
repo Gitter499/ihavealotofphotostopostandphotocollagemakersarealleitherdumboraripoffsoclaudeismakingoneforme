@@ -606,6 +606,58 @@ try {
   assert.equal(await page.locator('.size-popover').count(), 0, 'Escape should close the size popover')
   console.log('  ok  tapping a photo opens a size slider; the slot resizes live')
 
+  // layout templates: pin a classic and the slide snaps to it; Auto unpins
+  await page.locator('.slide-canvas').first().scrollIntoViewIfNeeded()
+  await page.waitForTimeout(200)
+  const preTpl = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  await page.locator('[aria-label="Layout template"]').first().click()
+  await page.waitForTimeout(300)
+  assert.ok((await page.locator('.tpl-option').count()) >= 3, 'template picker should offer Auto plus classics')
+  await page.locator('[data-template="grid-2x3"]').click()
+  await page.waitForTimeout(900)
+  const withTpl = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  assert.notEqual(withTpl, preTpl, 'pinning a template did not change the layout')
+  await page.locator('.tpl-option').first().click() // Auto
+  await page.waitForTimeout(900)
+  assert.notEqual(await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL()), withTpl, 'Auto should unpin')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  console.log('  ok  layout templates pin and unpin per slide')
+
+  // caption: typed text lands on the canvas (and would land in the export)
+  await page.locator('[aria-label="Caption"]').first().click()
+  await page.locator('.cap-input').fill('golden hour')
+  await page.waitForTimeout(600)
+  assert.notEqual(
+    await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL()),
+    withTpl,
+    'caption did not render',
+  )
+  await page.locator('.cap-input').fill('')
+  await page.waitForTimeout(400)
+  await page.keyboard.press('Escape')
+  console.log('  ok  captions render onto the slide')
+
+  // border slider strokes every photo; 9:16 reshapes the canvas
+  await openOptions()
+  const preBorder = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  await page.locator('input[type="range"]').nth(4).fill('6')
+  await page.waitForTimeout(500)
+  assert.notEqual(await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL()), preBorder, 'border did not draw')
+  await page.locator('input[type="range"]').nth(4).fill('0')
+  await page.getByRole('button', { name: '9:16' }).click()
+  await page.waitForTimeout(900)
+  const storyBox = await page.locator('.slide-canvas').first().boundingBox()
+  assert.ok(Math.abs(storyBox.height / storyBox.width - 16 / 9) < 0.03, `9:16 aspect wrong (${storyBox.height / storyBox.width})`)
+  await page.getByRole('button', { name: '4:5' }).click()
+  await closeOptions()
+  console.log('  ok  photo borders stroke and 9:16 reshapes for stories')
+
+  // the PWA service worker registers and controls the page
+  const swReady = await page.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => !!r?.active || !!r?.installing || !!r?.waiting))
+  assert.ok(swReady, 'service worker should be registered')
+  console.log('  ok  offline service worker registered')
+
   // phone width: the stats chip must sit clear of the dock, not under it
   await page.setViewportSize({ width: 390, height: 844 })
   await page.waitForTimeout(400)
