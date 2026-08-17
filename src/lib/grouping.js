@@ -48,54 +48,42 @@ export function planSizes(n, perSlide) {
 
 const isPortrait = (aspect) => aspect < 1
 
-function portraitFraction(group, aspectOf) {
-  if (group.length === 0) return 0
-  let p = 0
-  for (const id of group) if (isPortrait(aspectOf(id))) p++
-  return p / group.length
-}
-
-function mixScore(groups, aspectOf, globalP) {
-  let s = 0
-  for (const g of groups) s += Math.abs(portraitFraction(g, aspectOf) - globalP)
-  return s
-}
-
-// Swap photos between *neighbouring* groups (only near the shared boundary,
-// so chronology stays roughly intact) when it evens out the portrait/landscape
-// mix across slides.
-export function balanceOrientations(groups, aspectOf) {
-  const all = groups.flat()
-  if (all.length === 0) return groups
-  let portraits = 0
-  for (const id of all) if (isPortrait(aspectOf(id))) portraits++
-  const globalP = portraits / all.length
-
+// Shared driver for the neighbour-boundary passes: try swapping each of the
+// last two photos of a slide with each of the first two of the next (so
+// chronology stays roughly intact), keep a swap only when `cost` drops.
+// Slides under 3 photos (solo heroes, pairs) are deliberate — left alone.
+function boundarySwaps(groups, { eligible = () => true, cost }) {
   for (let pass = 0; pass < 2; pass++) {
     for (let gi = 0; gi < groups.length - 1; gi++) {
       const a = groups[gi]
       const b = groups[gi + 1]
-      // tiny slides (solo heroes, pairs) are deliberate — leave them alone
       if (a.length < 3 || b.length < 3) continue
-      // candidates: last two of a, first two of b
-      const aIdxs = a.length > 1 ? [a.length - 1, a.length - 2] : [a.length - 1]
-      const bIdxs = b.length > 1 ? [0, 1] : [0]
-      for (const ai of aIdxs) {
-        for (const bi of bIdxs) {
+      for (const ai of [a.length - 1, a.length - 2]) {
+        for (const bi of [0, 1]) {
           if (ai < 0 || bi >= b.length) continue
-          if (isPortrait(aspectOf(a[ai])) === isPortrait(aspectOf(b[bi]))) continue
-          const before = mixScore([a, b], aspectOf, globalP)
+          if (!eligible(a[ai], b[bi])) continue
+          const before = cost(a, b)
           ;[a[ai], b[bi]] = [b[bi], a[ai]]
-          const after = mixScore([a, b], aspectOf, globalP)
-          if (after >= before - 1e-9) {
-            // no improvement — swap back
-            ;[a[ai], b[bi]] = [b[bi], a[ai]]
+          if (cost(a, b) >= before - 1e-9) {
+            ;[a[ai], b[bi]] = [b[bi], a[ai]] // no improvement — swap back
           }
         }
       }
     }
   }
   return groups
+}
+
+// Even out the portrait/landscape mix across neighbouring slides.
+export function balanceOrientations(groups, aspectOf) {
+  const all = groups.flat()
+  if (all.length === 0) return groups
+  const globalP = all.filter((id) => isPortrait(aspectOf(id))).length / all.length
+  const portraitFraction = (g) => g.filter((id) => isPortrait(aspectOf(id))).length / Math.max(1, g.length)
+  return boundarySwaps(groups, {
+    eligible: (x, y) => isPortrait(aspectOf(x)) !== isPortrait(aspectOf(y)),
+    cost: (a, b) => Math.abs(portraitFraction(a) - globalP) + Math.abs(portraitFraction(b) - globalP),
+  })
 }
 
 // ---- per-slide size stepper ----
@@ -148,15 +136,13 @@ export function adjustGroupSize(groups, i, delta, maxPer = HARD_MAX_PER_SLIDE) {
 
 // ---- colour coherence (subtle) ----
 //
-// After orientation balancing, a second neighbour-boundary pass swaps photos
-// between adjacent slides when it makes each slide's palette more coherent.
-// Swaps only happen between photos of the SAME orientation (so the packing
-// mix is preserved) and only near slide boundaries (so chronology holds).
+// A second boundary pass pulls each slide's palette together. Swaps happen
+// only between photos of the SAME orientation (so the packing mix holds) and
+// only between vivid photos — near-grey ones have no palette worth chasing.
 
 function hueDistance(a, b) {
-  let d = Math.abs(a - b) % 360
-  if (d > 180) d = 360 - d
-  return d / 180
+  const d = Math.abs(a - b) % 360
+  return (d > 180 ? 360 - d : d) / 180
 }
 
 // weighted sum of pairwise hue distances — washed-out photos barely count
@@ -168,42 +154,23 @@ function groupColorCost(group, getPhoto) {
     for (let j = i + 1; j < group.length; j++) {
       const b = getPhoto(group[j])
       if (b?.hue == null) continue
-      const w = Math.min(a.sat ?? 0, b.sat ?? 0)
-      cost += hueDistance(a.hue, b.hue) * w
+      cost += hueDistance(a.hue, b.hue) * Math.min(a.sat ?? 0, b.sat ?? 0)
     }
   }
   return cost
 }
 
 export function harmonizeColors(groups, getPhoto) {
-  const isPortraitPhoto = (id) => (getPhoto(id)?.aspect ?? 1) < 1
-  for (let pass = 0; pass < 2; pass++) {
-    for (let gi = 0; gi < groups.length - 1; gi++) {
-      const a = groups[gi]
-      const b = groups[gi + 1]
-      if (a.length < 3 || b.length < 3) continue
-      const aIdxs = [a.length - 1, a.length - 2]
-      const bIdxs = [0, 1]
-      for (const ai of aIdxs) {
-        for (const bi of bIdxs) {
-          if (ai < 0 || bi >= b.length) continue
-          const pa = getPhoto(a[ai])
-          const pb = getPhoto(b[bi])
-          if (pa?.hue == null || pb?.hue == null) continue
-          // near-grey photos have no meaningful palette — moving them is churn
-          if ((pa.sat ?? 0) < 0.15 || (pb.sat ?? 0) < 0.15) continue
-          if (isPortraitPhoto(a[ai]) !== isPortraitPhoto(b[bi])) continue // keep the orientation mix
-          const before = groupColorCost(a, getPhoto) + groupColorCost(b, getPhoto)
-          ;[a[ai], b[bi]] = [b[bi], a[ai]]
-          const after = groupColorCost(a, getPhoto) + groupColorCost(b, getPhoto)
-          if (after >= before - 1e-9) {
-            ;[a[ai], b[bi]] = [b[bi], a[ai]]
-          }
-        }
-      }
-    }
-  }
-  return groups
+  return boundarySwaps(groups, {
+    eligible: (x, y) => {
+      const px = getPhoto(x)
+      const py = getPhoto(y)
+      if (px?.hue == null || py?.hue == null) return false
+      if ((px.sat ?? 0) < 0.15 || (py.sat ?? 0) < 0.15) return false
+      return ((px.aspect ?? 1) < 1) === ((py.aspect ?? 1) < 1)
+    },
+    cost: (a, b) => groupColorCost(a, getPhoto) + groupColorCost(b, getPhoto),
+  })
 }
 
 // ---- smarter selection: near-duplicate detection + quality demotion ----

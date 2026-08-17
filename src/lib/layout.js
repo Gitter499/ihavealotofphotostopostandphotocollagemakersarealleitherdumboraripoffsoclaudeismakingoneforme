@@ -159,14 +159,17 @@ function inset(rect, d) {
 // Quality-aware assignment: hill-climb pairwise swaps of photo↔rect so that,
 // aspect fit permitting, higher-quality photos land in larger slots. Crop
 // loss dominates the utility, so a hero swap never trades away fit.
-function refineAssignment(rects, aspects, qualities) {
+function refineAssignment(rects, aspects, qualities, shares) {
   const n = aspects.length
-  if (!qualities || n < 2) return rects
+  if ((!qualities && !shares) || n < 2) return rects
   const areas = rects.map((r) => r.w * r.h)
   const total = areas.reduce((a, b) => a + b, 0)
   const util = (pi, ri) => {
     const loss = cropLoss(aspects[pi], rects[ri].w / rects[ri].h)
-    let u = -2.2 * loss + 0.9 * (qualities[pi] ?? 0.5) * (areas[ri] / total) * n
+    let u = -2.2 * loss + 0.9 * (qualities?.[pi] ?? 0.5) * (areas[ri] / total) * n
+    // user-sized photos claim the slot whose area matches their weight —
+    // this beats the quality pull so resizing never shuffles other photos
+    if (shares) u -= 3 * Math.abs(areas[ri] / total - shares[pi]) * n
     if (loss > MAX_CROP_LOSS) u -= 4 * (loss - MAX_CROP_LOSS)
     return u
   }
@@ -222,7 +225,7 @@ export function computeLayout(
     collectLeaves(tree, workArea, leaves)
     let rects = new Array(n)
     for (const { i, rect } of leaves) rects[i] = inset(rect, gutter / 2)
-    rects = refineAssignment(rects, aspects, qualities)
+    rects = refineAssignment(rects, aspects, qualities, shares)
     let maxLoss = 0
     let sum = 0
     for (let i = 0; i < n; i++) {

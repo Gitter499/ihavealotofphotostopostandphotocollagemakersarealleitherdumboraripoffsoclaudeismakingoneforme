@@ -29,7 +29,7 @@ function roundedRectPath(ctx, x, y, w, h, r) {
 // `angle` is the user's standing tilt; `radius` rounds the photo's corners.
 // Filters are pre-baked into the bitmaps (see filters.js) — no ctx.filter,
 // which Safari doesn't support.
-export function drawCover(ctx, img, rect, { progress = 1, spin = 0, angle = 0, radius = 0 } = {}) {
+function drawCover(ctx, img, rect, { progress = 1, spin = 0, angle = 0, radius = 0 } = {}) {
   const iw = img.width
   const ih = img.height
   if (!iw || !ih || rect.w <= 0 || rect.h <= 0) return
@@ -73,7 +73,7 @@ export function drawCover(ctx, img, rect, { progress = 1, spin = 0, angle = 0, r
 // the next, so swiping the carousel reads as one continuous image.
 // `half` picks which half of the combined crop this slide shows. Bridges are
 // drawn edge-to-edge, without tilt or rounding — the seam must touch.
-export function drawBridge(ctx, img, rect, half) {
+function drawBridge(ctx, img, rect, half) {
   const iw = img.width
   const ih = img.height
   if (!iw || !ih || rect.w <= 0 || rect.h <= 0) return
