@@ -16,7 +16,7 @@ import { fireConfetti } from './lib/confetti.js'
 import { exportAllAsZip, renderSlideBlob, slideFileName, saveBlob } from './lib/exportZip.js'
 import { remixPlan } from './lib/remix.js'
 import { randomSeed } from './lib/rng.js'
-import { tiltAngle, orientBitmap } from './lib/render.js'
+import { tiltAngle, orientBitmap, drawDoodles } from './lib/render.js'
 import { templatesFor, templateById, templateRects } from './lib/templates.js'
 import { haptics } from './lib/haptics.js'
 import SlideCanvas from './components/SlideCanvas.jsx'
@@ -47,6 +47,8 @@ import {
   ArrowUUpRightIcon,
   ArrowClockwiseIcon,
   FlipHorizontalIcon,
+  ScribbleIcon,
+  CheckIcon,
 } from '@phosphor-icons/react'
 
 const BG_SWATCHES = [
@@ -125,6 +127,9 @@ export default function App() {
   const [textBoxes, setTextBoxes] = useState(() => new Map()) // slideKey → [{id, text, x, y, size, color, curve}]
   const [freeformPos, setFreeformPos] = useState(() => new Map()) // photoId → {x, y} on a freeform slide
   const [insets, setInsets] = useState(() => new Map()) // photoId → {x, y}: floats above its slide's collage
+  const [doodles, setDoodles] = useState(() => new Map()) // slideKey → [{color, size, pts:[x,y,...]}]
+  const [doodleEdit, setDoodleEdit] = useState(null) // {slideKey} — full-screen draw mode
+  const [doodlePen, setDoodlePen] = useState({ color: '#ffd60a', size: 0.012 })
   const [textEdit, setTextEdit] = useState(null) // {slideKey, textId, x, y} — text box editor
   const [moreEdit, setMoreEdit] = useState(null) // {slideKey} — mobile ⋯ action sheet
   const [showHints, setShowHints] = useState(false) // first-run coach marks
@@ -277,6 +282,7 @@ export default function App() {
       setTextBoxes(restoredTexts)
       setFreeformPos(new Map(workspace.freeformPos ?? []))
       setInsets(new Map(workspace.insets ?? []))
+      setDoodles(new Map(workspace.doodles ?? []))
       setImportState(null)
       setRestoring(false)
     })()
@@ -314,11 +320,12 @@ export default function App() {
         textBoxes: [...textBoxes],
         freeformPos: [...freeformPos],
         insets: [...insets],
+        doodles: [...doodles],
         savedAt: Date.now(),
       })
     }, 800)
     return () => clearTimeout(t)
-  }, [restoring, photos, slides, tray, perSlide, gutter, bgMode, look, tilt, cornerRadius, aspect, customAspect, borderW, borderColor, borderStyle, lookStrength, exportFormat, exportSize, meshSeams, sizeBoosts, slideTemplates, captions, textBoxes, freeformPos, insets])
+  }, [restoring, photos, slides, tray, perSlide, gutter, bgMode, look, tilt, cornerRadius, aspect, customAspect, borderW, borderColor, borderStyle, lookStrength, exportFormat, exportSize, meshSeams, sizeBoosts, slideTemplates, captions, textBoxes, freeformPos, insets, doodles])
 
   // Per-photo pan: nudge the crop's focal point inside its cell. The photo
   // object carries the new focal (so previews, exports, and the stored
@@ -473,6 +480,8 @@ export default function App() {
       })
       return next
     })
+    const ink = doodles.get(orig.key)
+    if (ink?.length) setDoodles((prev) => new Map(prev).set(copy.key, ink.map((st) => ({ ...st, pts: [...st.pts] }))))
   }
 
   // Start over: wipe the stored session and the workspace together.
@@ -491,6 +500,7 @@ export default function App() {
     setTextBoxes(new Map())
     setFreeformPos(new Map())
     setInsets(new Map())
+    setDoodles(new Map())
     setNotice(null)
     setSkipped([])
     setOptionsOpen(false)
@@ -509,6 +519,7 @@ export default function App() {
         setCapEdit(null)
         setMoreEdit(null)
         setTextEdit(null)
+        setDoodleEdit(null)
         return
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
@@ -1039,7 +1050,7 @@ export default function App() {
   // objects are treated as immutable (edits like nudges replace them), so a
   // snapshot is a handful of container copies, not a deep clone.
   const stateRef = useRef(null)
-  stateRef.current = { photos, slides, tray, meshSeams, sizeBoosts, slideTemplates, captions, textBoxes, freeformPos, insets }
+  stateRef.current = { photos, slides, tray, meshSeams, sizeBoosts, slideTemplates, captions, textBoxes, freeformPos, insets, doodles }
   const history = useRef({ past: [], future: [], lastTag: '', lastAt: 0 })
   const [historyTick, setHistoryTick] = useState(0)
 
@@ -1054,6 +1065,7 @@ export default function App() {
     textBoxes: new Map(stateRef.current.textBoxes),
     freeformPos: new Map(stateRef.current.freeformPos),
     insets: new Map(stateRef.current.insets),
+    doodles: new Map(stateRef.current.doodles),
   })
 
   // call BEFORE mutating; same-tag pushes within a second coalesce, so a
@@ -1093,6 +1105,7 @@ export default function App() {
     setTextBoxes(s.textBoxes)
     setFreeformPos(s.freeformPos)
     setInsets(s.insets)
+    setDoodles(s.doodles)
   }
 
   const undo = () => {
@@ -1358,6 +1371,7 @@ export default function App() {
           border: borderW > 0 ? { width: borderW, color: borderColor, style: borderStyle } : null,
           captions,
           textsBySlide: textBoxes,
+          doodlesBySlide: doodles,
           format: exportFormat,
         },
         (done, total) => setExportState({ done, total }),
@@ -1382,6 +1396,7 @@ export default function App() {
       border: borderW > 0 ? { width: borderW, color: borderColor, style: borderStyle } : null,
       caption: captions.get(slides[i].key) ?? null,
       texts: textBoxes.get(slides[i].key) ?? [],
+      doodles: doodles.get(slides[i].key) ?? [],
       format: exportFormat,
     })
     saveBlob(blob, slideFileName(i, exportFormat))
@@ -1403,19 +1418,29 @@ export default function App() {
       disabled: slide.photoIds.length === 0,
     },
     {
+      Icon: ScribbleIcon,
+      label: 'Doodle on this slide',
+      fn: () => {
+        haptics.select()
+        setDoodleEdit({ slideKey: slide.key })
+      },
+      disabled: slide.photoIds.length === 0,
+    },
+    {
       Icon: CopyIcon,
       label: 'Duplicate this slide',
       fn: () => duplicateSlide(i),
       disabled: slide.photoIds.length === 0 || slides.length >= MAX_SLIDES,
     },
-    { Icon: ShuffleIcon, label: 'Shuffle this slide', fn: () => shuffleSlide(i), disabled: slide.photoIds.length === 0 },
+    { Icon: ShuffleIcon, label: 'Shuffle this slide', fn: () => shuffleSlide(i), disabled: slide.photoIds.length === 0, primary: true },
     {
       Icon: DownloadSimpleIcon,
       label: 'Download this slide',
       fn: () => downloadOne(i),
       disabled: slide.photoIds.length === 0,
+      primary: true,
     },
-    { Icon: TrashIcon, label: 'Delete this slide', fn: () => deleteSlide(i), danger: true },
+    { Icon: TrashIcon, label: 'Delete this slide', fn: () => deleteSlide(i), danger: true, primary: true },
   ]
 
   const hasPhotos = photos.size > 0
@@ -1628,34 +1653,35 @@ export default function App() {
                     </button>
                   </span>
                   <span className="slide-actions">
-                    {isMobile ? (
-                      // progressive disclosure: one thumb-sized ⋯ opens the
-                      // action sheet instead of five tiny targets in a row
-                      <button
-                        className="icon-btn"
-                        onClick={() => {
-                          haptics.tap()
-                          setMoreEdit({ slideKey: slide.key })
-                        }}
-                        aria-label="Slide actions"
-                        title="Slide actions"
-                      >
-                        <DotsThreeIcon size={20} weight="bold" />
-                      </button>
-                    ) : (
-                      slideActions(slide, i).map(({ Icon, label, fn, disabled, danger }) => (
-                        <button
-                          key={label}
-                          className={`icon-btn ${danger ? 'icon-btn-danger' : ''}`}
-                          onClick={fn}
-                          disabled={disabled}
-                          aria-label={label}
-                          title={label}
-                        >
-                          <Icon size={16} weight="duotone" />
-                        </button>
-                      ))
-                    )}
+                    {/* budgeted header: the three most-used actions inline on
+                        desktop, everything else behind one ⋯ sheet — the same
+                        grammar phones already use */}
+                    {!isMobile &&
+                      slideActions(slide, i)
+                        .filter((a) => a.primary)
+                        .map(({ Icon, label, fn, disabled, danger }) => (
+                          <button
+                            key={label}
+                            className={`icon-btn ${danger ? 'icon-btn-danger' : ''}`}
+                            onClick={fn}
+                            disabled={disabled}
+                            aria-label={label}
+                            title={label}
+                          >
+                            <Icon size={16} weight="duotone" />
+                          </button>
+                        ))}
+                    <button
+                      className="icon-btn"
+                      onClick={() => {
+                        haptics.tap()
+                        setMoreEdit({ slideKey: slide.key })
+                      }}
+                      aria-label="Slide actions"
+                      title="Layout, caption, doodle, duplicate…"
+                    >
+                      <DotsThreeIcon size={20} weight="bold" />
+                    </button>
                   </span>
                 </div>
                 {slide.photoIds.length === 0 ? (
@@ -1676,6 +1702,7 @@ export default function App() {
                     border={borderW > 0 ? { width: borderW, color: borderColor, style: borderStyle } : null}
                     caption={captions.get(slide.key) ?? null}
                     texts={textBoxes.get(slide.key) ?? EMPTY_TEXTS}
+                    doodles={doodles.get(slide.key) ?? EMPTY_TEXTS}
                     onTextPointerDown={(e, textId, box) => startTextDrag(e, slide.key, textId, box)}
                     animKey={`${slide.key}:${aspect}:${gutter}:${(layouts[i]?.drawIds ?? []).join('.')}:${(layouts[i]?.drawRects ?? [])
                       .map((r) => (r ? `${r.x | 0},${r.y | 0},${r.w | 0}` : ''))
@@ -2053,7 +2080,9 @@ export default function App() {
           return (
             <div className="action-sheet glass-thick" role="dialog" aria-label="Slide actions">
               <span className="sheet-grabber" aria-hidden="true" />
-              {slideActions(slides[mi], mi).map(({ Icon, label, fn, disabled, danger }) => (
+              {slideActions(slides[mi], mi)
+                .filter((a) => isMobile || !a.primary)
+                .map(({ Icon, label, fn, disabled, danger }) => (
                 <button
                   key={label}
                   className={`sheet-row ${danger ? 'sheet-row-danger' : ''}`}
@@ -2286,6 +2315,111 @@ export default function App() {
           )
         })()}
 
+      {doodleEdit &&
+        (() => {
+          const dIdx = slides.findIndex((s) => s.key === doodleEdit.slideKey)
+          if (dIdx < 0) return null
+          const dSlide = slides[dIdx]
+          const ink = doodles.get(dSlide.key) ?? EMPTY_TEXTS
+          return (
+            <div className="doodle-mode" role="dialog" aria-label="Doodle">
+              <div
+                className="doodle-stage"
+                style={{
+                  aspectRatio: `${canvasW} / ${canvasH}`,
+                  width: `min(92vw, calc((100dvh - 180px) * ${(canvasW / canvasH).toFixed(4)}))`,
+                }}
+              >
+                <SlideCanvas
+                  slide={dSlide}
+                  layout={layouts[dIdx]}
+                  photos={photos}
+                  canvasW={canvasW}
+                  canvasH={canvasH}
+                  bg={slideBgs[dIdx]}
+                  imagesOverride={lookImages}
+                  tilt={tilt}
+                  radius={cornerRadius}
+                  border={borderW > 0 ? { width: borderW, color: borderColor, style: borderStyle } : null}
+                  caption={captions.get(dSlide.key) ?? null}
+                  texts={textBoxes.get(dSlide.key) ?? EMPTY_TEXTS}
+                  doodles={ink}
+                  animKey="doodle-mode"
+                />
+                <DoodleOverlay
+                  pen={doodlePen}
+                  onCommit={(stroke) => {
+                    pushHistory()
+                    setDoodles((prev) => {
+                      const next = new Map(prev)
+                      next.set(dSlide.key, [...(next.get(dSlide.key) ?? []), stroke])
+                      return next
+                    })
+                  }}
+                />
+              </div>
+              <div className="doodle-tools glass-thick">
+                {['#ffffff', '#0a0a0f', '#ffd60a', '#ff375f', '#0a84ff'].map((c) => (
+                  <button
+                    key={c}
+                    className={`swatch ${doodlePen.color === c ? 'active' : ''}`}
+                    style={{ background: c }}
+                    aria-label={`Pen colour ${c}`}
+                    onClick={() => setDoodlePen((p) => ({ ...p, color: c }))}
+                  />
+                ))}
+                <input
+                  type="range"
+                  min="4"
+                  max="30"
+                  value={Math.round(doodlePen.size * 1000)}
+                  aria-label="Brush size"
+                  onChange={(e) => setDoodlePen((p) => ({ ...p, size: Number(e.target.value) / 1000 }))}
+                />
+                <button
+                  className="chip"
+                  disabled={ink.length === 0}
+                  onClick={() => {
+                    pushHistory()
+                    setDoodles((prev) => {
+                      const next = new Map(prev)
+                      const rest = (next.get(dSlide.key) ?? []).slice(0, -1)
+                      if (rest.length) next.set(dSlide.key, rest)
+                      else next.delete(dSlide.key)
+                      return next
+                    })
+                  }}
+                >
+                  Undo stroke
+                </button>
+                <button
+                  className="chip"
+                  disabled={ink.length === 0}
+                  onClick={() => {
+                    pushHistory()
+                    setDoodles((prev) => {
+                      const next = new Map(prev)
+                      next.delete(dSlide.key)
+                      return next
+                    })
+                  }}
+                >
+                  Clear
+                </button>
+                <button
+                  className="chip doodle-done"
+                  onClick={() => {
+                    haptics.success()
+                    setDoodleEdit(null)
+                  }}
+                >
+                  <CheckIcon size={15} weight="bold" /> Done
+                </button>
+              </div>
+            </div>
+          )
+        })()}
+
       {sizeEdit && (
         <div
           className="size-popover glass-thick"
@@ -2423,6 +2557,64 @@ export default function App() {
 // them; pointing at it (or tapping, on touch) blooms the previews back open.
 // Pop-in, idle bob, and selection scale are pure CSS, gated behind
 // prefers-reduced-motion.
+// Transparent capture layer for doodle mode: committed strokes render in the
+// SlideCanvas beneath; this only draws the stroke being dragged right now.
+function DoodleOverlay({ pen, onCommit }) {
+  const ref = useRef(null)
+  const live = useRef(null)
+
+  const redraw = () => {
+    const c = ref.current
+    if (!c) return
+    const dpr = window.devicePixelRatio || 1
+    const w = c.clientWidth
+    const h = c.clientHeight
+    if (c.width !== Math.round(w * dpr)) {
+      c.width = Math.round(w * dpr)
+      c.height = Math.round(h * dpr)
+    }
+    const ctx = c.getContext('2d')
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, w, h)
+    if (live.current) drawDoodles(ctx, w, h, [live.current])
+  }
+
+  const onPointerDown = (e) => {
+    e.preventDefault()
+    const box = ref.current.getBoundingClientRect()
+    const norm = (ev) => [
+      Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width)),
+      Math.min(1, Math.max(0, (ev.clientY - box.top) / box.height)),
+    ]
+    const [x, y] = norm(e)
+    live.current = { color: pen.color, size: pen.size, pts: [x, y] }
+    haptics.tap()
+    redraw()
+    const onMove = (ev) => {
+      const [nx, ny] = norm(ev)
+      const pts = live.current.pts
+      const lx = pts[pts.length - 2]
+      const ly = pts[pts.length - 1]
+      if (Math.hypot((nx - lx) * box.width, (ny - ly) * box.height) < 2.5) return
+      pts.push(nx, ny)
+      redraw()
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      if (live.current) onCommit(live.current)
+      live.current = null
+      redraw()
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }
+
+  return <canvas ref={ref} className="doodle-overlay" onPointerDown={onPointerDown} />
+}
+
 function FilterBar({ photo, look, setLook }) {
   const [open, setOpen] = useState(false)
   const barRef = useRef(null)

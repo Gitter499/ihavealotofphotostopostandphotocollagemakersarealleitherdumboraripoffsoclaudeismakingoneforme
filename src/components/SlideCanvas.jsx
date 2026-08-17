@@ -27,6 +27,7 @@ export default function SlideCanvas({
   border,
   caption,
   texts,
+  doodles,
   animKey,
   onPhotoPointerDown,
   onTextPointerDown,
@@ -70,6 +71,7 @@ export default function SlideCanvas({
         border,
         caption,
         texts,
+        doodles,
       })
       // remember what is actually on screen so an interrupted morph
       // continues from where it is instead of jumping
@@ -118,7 +120,7 @@ export default function SlideCanvas({
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [slide, layout, photos, canvasW, canvasH, bg, imagesOverride, tilt, radius, border, caption, texts, animKey])
+  }, [slide, layout, photos, canvasW, canvasH, bg, imagesOverride, tilt, radius, border, caption, texts, doodles, animKey])
 
   const handlePointerDown = (e) => {
     const box = ref.current.getBoundingClientRect()

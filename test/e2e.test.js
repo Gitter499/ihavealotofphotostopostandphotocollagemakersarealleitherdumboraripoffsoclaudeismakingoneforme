@@ -178,6 +178,13 @@ try {
     await page.keyboard.press('Escape')
     await page.waitForTimeout(200)
   }
+  // desktop: secondary slide actions live behind the ⋯ sheet — open row by name
+  const sheetAction = async (label, idx = 0) => {
+    await page.locator('.slide-card').nth(idx).locator('[aria-label="Slide actions"]').click()
+    await page.waitForTimeout(300)
+    await page.locator('.action-sheet').getByRole('button', { name: label }).click()
+    await page.waitForTimeout(250)
+  }
 
   // switch to manual 6 per slide for the deterministic assertions below
   await openOptions()
@@ -751,7 +758,7 @@ try {
   await page.locator('.slide-canvas').first().scrollIntoViewIfNeeded()
   await page.waitForTimeout(200)
   const preTpl = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
-  await page.locator('[aria-label="Layout template"]').first().click()
+  await sheetAction('Layout template')
   await page.waitForTimeout(300)
   assert.ok((await page.locator('.tpl-option').count()) >= 3, 'template picker should offer Auto plus classics')
   // the slide's count varies with earlier drags — pin whichever classic fits
@@ -768,7 +775,7 @@ try {
 
   // freeform: the scrapbook template scatters polaroids you drag anywhere
   const preFree = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
-  await page.locator('[aria-label="Layout template"]').first().click()
+  await sheetAction('Layout template')
   await page.waitForTimeout(300)
   await page.locator('[data-template="freeform"]').click()
   await page.waitForTimeout(900)
@@ -793,7 +800,7 @@ try {
     freeCounts,
     'freeform drag must not relocate photos between slides',
   )
-  await page.locator('[aria-label="Layout template"]').first().click()
+  await sheetAction('Layout template')
   await page.waitForTimeout(300)
   await page.locator('.tpl-option').first().click() // Auto
   await page.waitForTimeout(700)
@@ -829,8 +836,35 @@ try {
   await page.waitForTimeout(200)
   console.log('  ok  picture-in-picture: Float lifts a photo, drags anywhere, tucks back in')
 
+  // doodle mode: full-screen draw, a stroke lands on the slide, Done exits
+  const preDoodle = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  await sheetAction('Doodle on this slide')
+  await page.waitForTimeout(500)
+  assert.equal(await page.locator('.doodle-mode').count(), 1, 'doodle mode should open full-screen')
+  const ov = await page.locator('.doodle-overlay').boundingBox()
+  await page.mouse.move(ov.x + ov.width * 0.25, ov.y + ov.height * 0.3)
+  await page.mouse.down()
+  await page.mouse.move(ov.x + ov.width * 0.7, ov.y + ov.height * 0.5, { steps: 12 })
+  await page.mouse.move(ov.x + ov.width * 0.4, ov.y + ov.height * 0.7, { steps: 12 })
+  await page.mouse.up()
+  await page.waitForTimeout(400)
+  await page.locator('.doodle-mode').getByRole('button', { name: /Done/ }).click()
+  await page.waitForTimeout(400)
+  assert.equal(await page.locator('.doodle-mode').count(), 0, 'Done should close doodle mode')
+  const postDoodle = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  assert.notEqual(postDoodle, preDoodle, 'the stroke did not land on the slide')
+  // undo clears the stroke from history like any other edit
+  await page.keyboard.press('Control+z')
+  await page.waitForTimeout(500)
+  assert.equal(
+    await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL()),
+    preDoodle,
+    'Ctrl+Z should erase the doodle stroke',
+  )
+  console.log('  ok  doodle mode draws onto the slide and undoes cleanly')
+
   // caption: typed text lands on the canvas (and would land in the export)
-  await page.locator('[aria-label="Caption"]').first().click()
+  await sheetAction('Caption')
   await page.locator('.cap-input').fill('golden hour')
   await page.waitForTimeout(600)
   assert.notEqual(
@@ -847,7 +881,7 @@ try {
   await page.locator('.slide-canvas').first().scrollIntoViewIfNeeded()
   await page.waitForTimeout(200)
   const preText = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
-  await page.locator('[aria-label="Caption"]').first().click()
+  await sheetAction('Caption')
   await page.getByRole('button', { name: '+ Text box' }).click()
   await page.waitForTimeout(500)
   assert.equal(await page.locator('.text-popover').count(), 1, 'adding a text box should open its editor')
@@ -900,7 +934,7 @@ try {
 
   // a reload restores the whole session from IndexedDB — photos, slides,
   // and arrangement state like captions
-  await page.locator('[aria-label="Caption"]').first().click()
+  await sheetAction('Caption')
   await page.locator('.cap-input').fill('still here')
   await page.keyboard.press('Escape')
   await page.waitForTimeout(1400) // let the debounced snapshot land
@@ -911,7 +945,7 @@ try {
   })
   await page.waitForTimeout(1200)
   assert.equal(await page.locator('.slide-card').count(), 5, 'slides did not restore after reload')
-  await page.locator('[aria-label="Caption"]').first().click()
+  await sheetAction('Caption')
   assert.equal(await page.locator('.cap-input').inputValue(), 'still here', 'caption did not survive the reload')
   await page.locator('.cap-input').fill('')
   await page.keyboard.press('Escape')
@@ -948,7 +982,7 @@ try {
   assert.equal(await page.locator('[aria-label="Layout template"]').count(), 0, 'inline actions should hide on phones')
   await page.locator('[aria-label="Slide actions"]').first().click()
   await page.waitForTimeout(400)
-  assert.equal(await page.locator('.action-sheet .sheet-row').count(), 6, 'action sheet should list all six actions')
+  assert.equal(await page.locator('.action-sheet .sheet-row').count(), 7, 'action sheet should list all seven actions')
   // the spring animation overshoots on entry — wait for the sheet to settle
   await page.waitForFunction(
     () => Math.abs(document.querySelector('.action-sheet').getBoundingClientRect().bottom - window.innerHeight) < 2,

@@ -40,7 +40,7 @@ export async function renderSlideBlob(
   slide,
   layout,
   photosById,
-  { width, height, bg, look, lookStrength = 1, tilt = 0, radius = 0, border = null, caption = null, texts = [], format = 'jpeg', scale = 4 / 3 },
+  { width, height, bg, look, lookStrength = 1, tilt = 0, radius = 0, border = null, caption = null, texts = [], doodles = [], format = 'jpeg', scale = 4 / 3 },
 ) {
   const images = new Map()
   const focals = new Map()
@@ -62,7 +62,7 @@ export async function renderSlideBlob(
     const ctx = canvas.getContext('2d')
     ctx.imageSmoothingQuality = 'high'
     ctx.scale(scale, scale)
-    drawSlide(ctx, { width, height, bg, photoIds: drawIds, rects, images, tilt, radius, focals, border, caption, texts })
+    drawSlide(ctx, { width, height, bg, photoIds: drawIds, rects, images, tilt, radius, focals, border, caption, texts, doodles })
     return format === 'png'
       ? await canvas.convertToBlob({ type: 'image/png' })
       : await canvas.convertToBlob({ type: 'image/jpeg', quality: EXPORT_QUALITY })
@@ -79,7 +79,7 @@ export async function exportAllAsZip(
   slides,
   layouts,
   photosById,
-  { width, height, bgs, look, lookStrength, tilt, radius, border, captions, textsBySlide, format, scale },
+  { width, height, bgs, look, lookStrength, tilt, radius, border, captions, textsBySlide, doodlesBySlide, format, scale },
   onProgress,
 ) {
   const zip = new JSZip()
@@ -96,6 +96,7 @@ export async function exportAllAsZip(
       border,
       caption: captions?.get(slides[i].key) ?? null,
       texts: textsBySlide?.get(slides[i].key) ?? [],
+      doodles: doodlesBySlide?.get(slides[i].key) ?? [],
       format,
       scale,
     })

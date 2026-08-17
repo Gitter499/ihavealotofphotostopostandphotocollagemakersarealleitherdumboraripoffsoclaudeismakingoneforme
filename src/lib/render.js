@@ -211,6 +211,43 @@ export function textBoxRect(ctx, width, height, t) {
   return { x: t.x * width - w / 2 - pad, y: t.y * height - h / 2 - pad, w: w + 2 * pad, h: h + 2 * pad }
 }
 
+// A doodle stroke: normalized points smoothed through quadratic midpoints,
+// so hand-drawn lines look the same at preview and export resolution.
+function drawStroke(ctx, width, height, s) {
+  const pts = s.pts
+  if (!pts || pts.length < 2) return
+  ctx.save()
+  ctx.strokeStyle = s.color || '#ffffff'
+  ctx.fillStyle = s.color || '#ffffff'
+  ctx.lineWidth = Math.max(1, (s.size ?? 0.012) * width)
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  if (pts.length < 6) {
+    // a tap: draw a dot
+    ctx.beginPath()
+    ctx.arc(pts[0] * width, pts[1] * height, ctx.lineWidth / 2, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+    return
+  }
+  ctx.beginPath()
+  ctx.moveTo(pts[0] * width, pts[1] * height)
+  for (let i = 2; i + 3 < pts.length; i += 2) {
+    const cx = pts[i] * width
+    const cy = pts[i + 1] * height
+    const mx = ((pts[i] + pts[i + 2]) / 2) * width
+    const my = ((pts[i + 1] + pts[i + 3]) / 2) * height
+    ctx.quadraticCurveTo(cx, cy, mx, my)
+  }
+  ctx.lineTo(pts[pts.length - 2] * width, pts[pts.length - 1] * height)
+  ctx.stroke()
+  ctx.restore()
+}
+
+export function drawDoodles(ctx, width, height, strokes) {
+  for (const s of strokes) drawStroke(ctx, width, height, s)
+}
+
 // Slide caption: display type over a soft scrim so it reads on any photo.
 // Wraps to at most two lines; pos is 'top' or 'bottom'.
 function drawCaption(ctx, width, height, caption) {
@@ -273,6 +310,7 @@ export function drawSlide(
     border = null,
     caption = null,
     texts = [],
+    doodles = [],
   },
 ) {
   ctx.fillStyle = bg
@@ -295,6 +333,7 @@ export function drawSlide(
     })
   }
   if (caption) drawCaption(ctx, width, height, caption)
+  drawDoodles(ctx, width, height, doodles)
   for (const t of texts) drawTextBox(ctx, width, height, t)
 }
 
