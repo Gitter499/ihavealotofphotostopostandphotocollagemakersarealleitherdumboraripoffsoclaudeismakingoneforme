@@ -669,6 +669,26 @@ try {
     statsBox.y < dockBox.y + dockBox.height &&
     statsBox.y + statsBox.height > dockBox.y
   assert.ok(!overlap, `stats chip overlaps the dock on mobile (${JSON.stringify({ statsBox, dockBox })})`)
+
+  // phone width declutters: slide actions collapse behind one ⋯ button that
+  // opens a bottom action sheet, and editors anchor to the thumb zone
+  assert.equal(await page.locator('[aria-label="Layout template"]').count(), 0, 'inline actions should hide on phones')
+  await page.locator('[aria-label="Slide actions"]').first().click()
+  await page.waitForTimeout(400)
+  assert.equal(await page.locator('.action-sheet .sheet-row').count(), 5, 'action sheet should list all five actions')
+  const sheetRect = await page.evaluate(() => document.querySelector('.action-sheet').getBoundingClientRect().toJSON())
+  assert.ok(Math.abs(sheetRect.bottom - 844) < 2, `action sheet should sit on the bottom edge (bottom ${sheetRect.bottom})`)
+  await page.locator('.sheet-row', { hasText: 'Caption' }).click()
+  await page.waitForTimeout(400)
+  const capRect = await page.evaluate(() => document.querySelector('.cap-popover').getBoundingClientRect().toJSON())
+  assert.ok(
+    Math.abs(capRect.bottom - 844) < 2 && capRect.width >= 388,
+    `caption editor should be a full-width bottom sheet (${capRect.bottom}, ${capRect.width})`,
+  )
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  console.log('  ok  phone width: ⋯ action sheet and thumb-zone bottom sheets')
+
   await page.setViewportSize({ width: 1280, height: 720 })
   await page.waitForTimeout(300)
   console.log('  ok  stats chip clears the dock at phone width')

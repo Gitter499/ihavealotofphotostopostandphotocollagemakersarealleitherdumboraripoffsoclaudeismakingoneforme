@@ -17,6 +17,7 @@ import { remixPlan } from './lib/remix.js'
 import { randomSeed } from './lib/rng.js'
 import { tiltAngle } from './lib/render.js'
 import { templatesFor, templateById, templateRects } from './lib/templates.js'
+import { haptics } from './lib/haptics.js'
 import SlideCanvas from './components/SlideCanvas.jsx'
 import Logo from './components/Logo.jsx'
 import Wordmark from './components/Wordmark.jsx'
@@ -32,6 +33,7 @@ import {
   LinkBreakIcon,
   SquaresFourIcon,
   TextTIcon,
+  DotsThreeIcon,
 } from '@phosphor-icons/react'
 
 const BG_SWATCHES = [
@@ -41,6 +43,19 @@ const BG_SWATCHES = [
 ]
 
 let slideKeyCounter = 1
+
+// Phone-width detection: below this, floating popovers become bottom sheets
+// in the thumb zone and per-slide actions collapse behind one ⋯ button.
+function useIsMobile() {
+  const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 640px)').matches)
+  useEffect(() => {
+    const q = window.matchMedia('(max-width: 640px)')
+    const on = () => setMobile(q.matches)
+    q.addEventListener('change', on)
+    return () => q.removeEventListener('change', on)
+  }, [])
+  return mobile
+}
 
 // Non-modal popovers: a pointerdown anywhere `isInside` doesn't claim closes
 // them, and the touch still lands on whatever was touched.
@@ -75,6 +90,7 @@ export default function App() {
   const [tplEdit, setTplEdit] = useState(null) // {slideKey, count, x, y} — template picker
   const [captions, setCaptions] = useState(() => new Map()) // slideKey → {text, pos}
   const [capEdit, setCapEdit] = useState(null) // {slideKey, x, y} — caption editor
+  const [moreEdit, setMoreEdit] = useState(null) // {slideKey} — mobile ⋯ action sheet
   const [borderW, setBorderW] = useState(0) // px stroke around every photo
   const [borderColor, setBorderColor] = useState('#ffffff')
   const [aspect, setAspect] = useState('4:5')
@@ -143,6 +159,7 @@ export default function App() {
         setSizeEdit(null)
         setTplEdit(null)
         setCapEdit(null)
+        setMoreEdit(null)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -159,6 +176,8 @@ export default function App() {
   useDismiss(!!sizeEdit, (e) => e.target.closest?.('.size-popover'), () => setSizeEdit(null))
   useDismiss(!!tplEdit, (e) => e.target.closest?.('.tpl-popover'), () => setTplEdit(null))
   useDismiss(!!capEdit, (e) => e.target.closest?.('.cap-popover'), () => setCapEdit(null))
+  useDismiss(!!moreEdit, (e) => e.target.closest?.('.action-sheet'), () => setMoreEdit(null))
+  const isMobile = useIsMobile()
 
   // Accept drops anywhere on the page.
   useEffect(() => {
@@ -279,6 +298,7 @@ export default function App() {
   const toggleSeam = (i) => {
     const key = seamKey(i)
     if (!key) return
+    haptics.select()
     setMeshSeams((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
@@ -287,6 +307,7 @@ export default function App() {
     })
   }
   const meshAll = () => {
+    haptics.tap()
     setMeshSeams(() => {
       const next = new Set()
       for (let i = 0; i < slides.length - 1; i++) {
@@ -295,7 +316,10 @@ export default function App() {
       return next
     })
   }
-  const meshNone = () => setMeshSeams(new Set())
+  const meshNone = () => {
+    haptics.tap()
+    setMeshSeams(new Set())
+  }
 
   const layoutsRef = useRef(layouts)
   layoutsRef.current = layouts
@@ -379,6 +403,7 @@ export default function App() {
       avoid: lastLens.current,
     })
     lastLens.current = key
+    haptics.success()
     setSlides(groups.map((ids) => ({ key: `s${slideKeyCounter++}`, photoIds: ids, seed: randomSeed() })))
     setRemixNote({ label, at: randomSeed() })
   }
@@ -392,6 +417,7 @@ export default function App() {
   const deleteSlide = (i) => {
     const removed = slides[i]
     if (!removed) return
+    haptics.warning()
     setSlides((prev) => prev.filter((_, j) => j !== i))
     if (removed.photoIds.length) {
       setPhotos((prev) => {
@@ -410,6 +436,7 @@ export default function App() {
 
   // reorder two photos within one slide: their rects trade places
   const swapPhotos = (slideKey, idA, idB) => {
+    haptics.select()
     setSlides((prev) =>
       prev.map((s) => (s.key === slideKey ? { ...s, swaps: [...(s.swaps ?? []), [idA, idB]] } : s)),
     )
@@ -420,6 +447,7 @@ export default function App() {
   // Dragging a photo onto the bridge (or the bridge onto a photo) hands the
   // seam over to the other photo.
   const swapPhotoOrder = (slideKey, idA, idB) => {
+    haptics.select()
     setSlides((prev) =>
       prev.map((s) => {
         if (s.key !== slideKey) return s
@@ -435,6 +463,7 @@ export default function App() {
 
   // "−"/"+" on a slide: rebalance a boundary photo with a neighbouring slide
   const adjustSlide = (i, delta) => {
+    haptics.tap()
     setSlides((prev) => {
       const groups = prev.map((s) => s.photoIds)
       const result = adjustGroupSize(groups, i, delta)
@@ -465,6 +494,7 @@ export default function App() {
   const relocatePhoto = (photoId, toKey) => {
     const fromKey = slidesRef.current.find((s) => s.photoIds.includes(photoId))?.key ?? TRAY_KEY
     if (fromKey === toKey) return
+    haptics.select()
     setTray((prev) => (toKey === TRAY_KEY ? [...prev, photoId] : prev.filter((id) => id !== photoId)))
     setSlides((prev) =>
       prev
@@ -482,6 +512,7 @@ export default function App() {
   const returnAllFromTray = () => {
     const parked = trayRef.current
     if (parked.length === 0) return
+    haptics.tap()
     setSlides((prev) => {
       const next = prev.length
         ? prev.map((s) => ({ ...s, photoIds: [...s.photoIds] }))
@@ -509,6 +540,7 @@ export default function App() {
     const activate = (x, y) => {
       active = true
       document.body.dataset.dragging = '1'
+      haptics.pickup()
       setSizeEdit(null)
       setDrag({ photoId, fromKey: slideKey, x, y, overKey: null })
     }
@@ -630,6 +662,7 @@ export default function App() {
         (done, total) => setExportState({ done, total }),
       )
       saveBlob(zip, 'carousel.zip')
+      haptics.success()
       const btn = document.querySelector('.dock-btn-primary')
       const box = btn?.getBoundingClientRect()
       fireConfetti(box ? box.left + box.width / 2 : window.innerWidth / 2, box ? box.top : window.innerHeight - 60)
@@ -649,6 +682,31 @@ export default function App() {
     })
     saveBlob(blob, slideFileName(i))
   }
+
+  // one definition of a slide's actions, rendered inline on desktop and as
+  // an action sheet behind ⋯ on phones
+  const slideActions = (slide, i) => [
+    {
+      Icon: SquaresFourIcon,
+      label: 'Layout template',
+      fn: (e) => setTplEdit({ slideKey: slide.key, count: slide.photoIds.length, x: e?.clientX ?? 0, y: e?.clientY ?? 0 }),
+      disabled: slide.photoIds.length === 0,
+    },
+    {
+      Icon: TextTIcon,
+      label: 'Caption',
+      fn: (e) => setCapEdit({ slideKey: slide.key, x: e?.clientX ?? 0, y: e?.clientY ?? 0 }),
+      disabled: slide.photoIds.length === 0,
+    },
+    { Icon: ShuffleIcon, label: 'Shuffle this slide', fn: () => shuffleSlide(i), disabled: slide.photoIds.length === 0 },
+    {
+      Icon: DownloadSimpleIcon,
+      label: 'Download this slide',
+      fn: () => downloadOne(i),
+      disabled: slide.photoIds.length === 0,
+    },
+    { Icon: TrashIcon, label: 'Delete this slide', fn: () => deleteSlide(i), danger: true },
+  ]
 
   const hasPhotos = photos.size > 0
   const busyImporting = importState != null
@@ -748,7 +806,14 @@ export default function App() {
       ) : (
         <>
           <div className="filterbar-row">
-            <FilterBar photo={photos.values().next().value} look={look} setLook={setLook} />
+            <FilterBar
+              photo={photos.values().next().value}
+              look={look}
+              setLook={(k) => {
+                haptics.tap()
+                setLook(k)
+              }}
+            />
           </div>
           {busyImporting && (
             <div className="importing-inline">
@@ -822,35 +887,34 @@ export default function App() {
                     </button>
                   </span>
                   <span className="slide-actions">
-                    {[
-                      {
-                        Icon: SquaresFourIcon,
-                        label: 'Layout template',
-                        fn: (e) =>
-                          setTplEdit({ slideKey: slide.key, count: slide.photoIds.length, x: e.clientX, y: e.clientY }),
-                        needsPhotos: true,
-                      },
-                      {
-                        Icon: TextTIcon,
-                        label: 'Caption',
-                        fn: (e) => setCapEdit({ slideKey: slide.key, x: e.clientX, y: e.clientY }),
-                        needsPhotos: true,
-                      },
-                      { Icon: ShuffleIcon, label: 'Shuffle this slide', fn: () => shuffleSlide(i), needsPhotos: true },
-                      { Icon: DownloadSimpleIcon, label: 'Download this slide', fn: () => downloadOne(i), needsPhotos: true },
-                      { Icon: TrashIcon, label: 'Delete this slide', fn: () => deleteSlide(i), danger: true },
-                    ].map(({ Icon, label, fn, needsPhotos, danger }) => (
+                    {isMobile ? (
+                      // progressive disclosure: one thumb-sized ⋯ opens the
+                      // action sheet instead of five tiny targets in a row
                       <button
-                        key={label}
-                        className={`icon-btn ${danger ? 'icon-btn-danger' : ''}`}
-                        onClick={fn}
-                        disabled={needsPhotos && slide.photoIds.length === 0}
-                        aria-label={label}
-                        title={label}
+                        className="icon-btn"
+                        onClick={() => {
+                          haptics.tap()
+                          setMoreEdit({ slideKey: slide.key })
+                        }}
+                        aria-label="Slide actions"
+                        title="Slide actions"
                       >
-                        <Icon size={16} weight="duotone" />
+                        <DotsThreeIcon size={20} weight="bold" />
                       </button>
-                    ))}
+                    ) : (
+                      slideActions(slide, i).map(({ Icon, label, fn, disabled, danger }) => (
+                        <button
+                          key={label}
+                          className={`icon-btn ${danger ? 'icon-btn-danger' : ''}`}
+                          onClick={fn}
+                          disabled={disabled}
+                          aria-label={label}
+                          title={label}
+                        >
+                          <Icon size={16} weight="duotone" />
+                        </button>
+                      ))
+                    )}
                   </span>
                 </div>
                 {slide.photoIds.length === 0 ? (
@@ -1108,15 +1172,45 @@ export default function App() {
 
       {drag && <DragGhost drag={drag} photo={photos.get(drag.photoId)} />}
 
+      {moreEdit &&
+        (() => {
+          const mi = slides.findIndex((s) => s.key === moreEdit.slideKey)
+          if (mi < 0) return null
+          return (
+            <div className="action-sheet glass-thick" role="dialog" aria-label="Slide actions">
+              <span className="sheet-grabber" aria-hidden="true" />
+              {slideActions(slides[mi], mi).map(({ Icon, label, fn, disabled, danger }) => (
+                <button
+                  key={label}
+                  className={`sheet-row ${danger ? 'sheet-row-danger' : ''}`}
+                  disabled={disabled}
+                  onClick={(e) => {
+                    haptics.select()
+                    setMoreEdit(null)
+                    fn(e)
+                  }}
+                >
+                  <Icon size={20} weight="duotone" />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          )
+        })()}
+
       {tplEdit && (
         <div
           className="tpl-popover glass-thick"
           role="dialog"
           aria-label="Layout template"
-          style={{
-            left: Math.max(8, Math.min(tplEdit.x - 150, window.innerWidth - 320)),
-            top: Math.max(8, Math.min(tplEdit.y + 14, window.innerHeight - 300)),
-          }}
+          style={
+            isMobile
+              ? undefined
+              : {
+                  left: Math.max(8, Math.min(tplEdit.x - 150, window.innerWidth - 320)),
+                  top: Math.max(8, Math.min(tplEdit.y + 14, window.innerHeight - 300)),
+                }
+          }
         >
           <span className="control-label">Template</span>
           <div className="tpl-grid">
@@ -1170,10 +1264,14 @@ export default function App() {
           className="cap-popover glass-thick"
           role="dialog"
           aria-label="Caption"
-          style={{
-            left: Math.max(8, Math.min(capEdit.x - 150, window.innerWidth - 320)),
-            top: Math.max(8, Math.min(capEdit.y + 14, window.innerHeight - 180)),
-          }}
+          style={
+            isMobile
+              ? undefined
+              : {
+                  left: Math.max(8, Math.min(capEdit.x - 150, window.innerWidth - 320)),
+                  top: Math.max(8, Math.min(capEdit.y + 14, window.innerHeight - 180)),
+                }
+          }
         >
           <span className="control-label">Caption</span>
           <input
@@ -1218,10 +1316,14 @@ export default function App() {
           className="size-popover glass-thick"
           role="dialog"
           aria-label="Photo size"
-          style={{
-            left: Math.max(8, Math.min(sizeEdit.x - 130, window.innerWidth - 268)),
-            top: Math.max(8, Math.min(sizeEdit.y + 16, window.innerHeight - 120)),
-          }}
+          style={
+            isMobile
+              ? undefined
+              : {
+                  left: Math.max(8, Math.min(sizeEdit.x - 130, window.innerWidth - 268)),
+                  top: Math.max(8, Math.min(sizeEdit.y + 16, window.innerHeight - 120)),
+                }
+          }
         >
           <span className="control-label">
             Size <b>×{(sizeBoosts.get(sizeEdit.photoId) ?? 1).toFixed(2)}</b>
@@ -1236,6 +1338,8 @@ export default function App() {
               aria-label="Photo size"
               onChange={(e) => {
                 const v = Number(e.target.value) / 100
+                const prev = sizeBoosts.get(sizeEdit.photoId) ?? 1
+                if (prev !== v && (prev - 1) * (v - 1) <= 0) haptics.detent()
                 setSizeBoosts((prev) => {
                   const next = new Map(prev)
                   if (v === 1) next.delete(sizeEdit.photoId)
