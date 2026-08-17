@@ -390,6 +390,71 @@ try {
   assert.notEqual(preSwap, postSwap, 'within-slide drag did not reorder photos')
   console.log('  ok  dragging a photo within a slide swaps positions')
 
+  // playground: park a photo on the shelf, remix around it, bring it back
+  await page.locator('.playground').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(300)
+  const pgBox = await page.locator('.playground').boundingBox()
+  const srcBox = await page.locator('.slide-canvas').first().boundingBox()
+  const slideCounts = () =>
+    page.evaluate(() => [...document.querySelectorAll('.slide-count')].map((el) => parseInt(el.textContent, 10)))
+  const preParkCounts = await slideCounts()
+  await page.mouse.move(srcBox.x + srcBox.width * 0.3, srcBox.y + srcBox.height * 0.3)
+  await page.mouse.down()
+  await page.mouse.move(pgBox.x + pgBox.width / 2, pgBox.y + pgBox.height / 2, { steps: 12 })
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+  assert.equal(await page.locator('.tray-thumb').count(), 1, 'photo did not land on the playground shelf')
+  const parkedCounts = await slideCounts()
+  assert.equal(parkedCounts[0], preParkCounts[0] - 1, 'source slide should shrink by the parked photo')
+  assert.match(await page.locator('.counts').textContent(), /30 photos .*1 aside/, 'stats should count the parked photo')
+  // remix leaves the shelf alone
+  await page.getByRole('button', { name: 'Remix', exact: true }).click()
+  await page.waitForTimeout(900)
+  assert.equal(await page.locator('.tray-thumb').count(), 1, 'remix must not touch parked photos')
+  assert.match(await page.locator('.counts').textContent(), /1 aside/, 'parked photo should survive a remix')
+  // drag it back onto a slide
+  await page.locator('.playground').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(300)
+  const thumbBox = await page.locator('.tray-thumb').first().boundingBox()
+  const destBox = await page.locator('.slide-canvas').nth(1).boundingBox()
+  const preReturn = await slideCounts()
+  await page.mouse.move(thumbBox.x + thumbBox.width / 2, thumbBox.y + thumbBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(destBox.x + destBox.width / 2, destBox.y + destBox.height / 2, { steps: 12 })
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+  assert.equal(await page.locator('.tray-thumb').count(), 0, 'shelf should be empty after dragging back')
+  const postReturn = await slideCounts()
+  assert.equal(postReturn[1], preReturn[1] + 1, 'destination slide should gain the returned photo')
+  // park one more and use Return all instead (remix reshaped the strip, so
+  // yesterday's coordinates are stale — measure again)
+  await page.locator('.playground').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(300)
+  const srcBox2 = await page.locator('.slide-canvas').first().boundingBox()
+  const pgBox2 = await page.locator('.playground').boundingBox()
+  await page.mouse.move(srcBox2.x + srcBox2.width * 0.5, srcBox2.y + srcBox2.height * 0.5)
+  await page.mouse.down()
+  await page.mouse.move(pgBox2.x + pgBox2.width / 2, pgBox2.y + pgBox2.height / 2, { steps: 12 })
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+  assert.equal(await page.locator('.tray-thumb').count(), 1, 'second park failed')
+  await page.getByRole('button', { name: 'Return all' }).click()
+  await page.waitForTimeout(500)
+  assert.equal(await page.locator('.tray-thumb').count(), 0, 'Return all should empty the shelf')
+  const afterReturnAll = await slideCounts()
+  assert.equal(
+    afterReturnAll.reduce((a, b) => a + b, 0),
+    30,
+    'every photo must be back on a slide',
+  )
+  console.log('  ok  playground parks photos through remixes; drag-back and Return all restore them')
+  // deterministic 5×6 again for the tests below
+  await openOptions()
+  await page.locator('input[type="range"]').first().fill('5')
+  await page.locator('input[type="range"]').first().fill('6')
+  await page.waitForFunction(() => document.querySelectorAll('.slide-card').length === 5, null, { timeout: 10000 })
+  await closeOptions()
+
   // 1:1 aspect export
   await openOptions()
   await page.getByRole('button', { name: '1:1' }).click()
