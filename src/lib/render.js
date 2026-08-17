@@ -71,7 +71,7 @@ function drawCover(
   ctx,
   img,
   rect,
-  { progress = 1, spin = 0, angle = 0, radius = 0, frame = false, focal = null, border = null } = {},
+  { progress = 1, spin = 0, angle = 0, radius = 0, frame = false, pip = false, focal = null, border = null } = {},
 ) {
   const iw = img.width
   const ih = img.height
@@ -82,7 +82,7 @@ function drawCover(
   const dh = rect.h * grow
   const rotation = angle + (spin ? spin * (1 - e) : 0)
 
-  if (e >= 1 && !rotation && !radius && !frame) {
+  if (e >= 1 && !rotation && !radius && !frame && !pip) {
     const { sx, sy, sw, sh } = coverCrop(iw, ih, rect.w / rect.h, focal)
     ctx.drawImage(img, sx, sy, sw, sh, rect.x, rect.y, rect.w, rect.h)
     if (border?.width) strokeBorder(ctx, rect.x, rect.y, rect.w, rect.h, 0, border)
@@ -96,19 +96,20 @@ function drawCover(
   let py = -dh / 2
   let pw = dw
   let ph = dh
-  if (frame) {
-    // paper mat under the photo, deeper chin at the bottom — polaroid
+  if (frame || pip) {
+    // paper mat under the photo — polaroid chin for frames, an even white
+    // border for floating picture-in-picture insets
     ctx.shadowColor = 'rgba(0, 0, 0, 0.45)'
     ctx.shadowBlur = 22
     ctx.shadowOffsetY = 8
-    ctx.fillStyle = '#f6f4ef'
+    ctx.fillStyle = pip ? '#ffffff' : '#f6f4ef'
     ctx.fillRect(px, py, dw, dh)
     ctx.shadowColor = 'transparent'
-    const m = Math.min(dw, dh) * 0.05
+    const m = Math.min(dw, dh) * (pip ? 0.035 : 0.05)
     px += m
     py += m
     pw -= 2 * m
-    ph -= 2 * m + m * 1.6
+    ph -= 2 * m + (pip ? 0 : m * 1.6)
   } else if (radius > 0) {
     roundedRectPath(ctx, px, py, pw, ph, radius)
     ctx.clip()
@@ -285,11 +286,12 @@ export function drawSlide(
     drawCover(ctx, img, rect, {
       progress: p,
       spin: p < 1 ? (i % 2 ? 1 : -1) * 0.05 : 0,
-      angle: rect.rot ?? tiltAngle(photoIds[i], tilt),
-      radius: rect.frame ? 0 : radius,
+      angle: rect.pip ? 0 : (rect.rot ?? tiltAngle(photoIds[i], tilt)),
+      radius: rect.frame || rect.pip ? 0 : radius,
       frame: !!rect.frame,
+      pip: !!rect.pip,
       focal: focals?.get(photoIds[i]) ?? null,
-      border,
+      border: rect.pip ? null : border,
     })
   }
   if (caption) drawCaption(ctx, width, height, caption)

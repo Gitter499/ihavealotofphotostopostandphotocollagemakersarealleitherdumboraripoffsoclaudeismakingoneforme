@@ -124,6 +124,7 @@ export default function App() {
   const [capEdit, setCapEdit] = useState(null) // {slideKey, x, y} — caption editor
   const [textBoxes, setTextBoxes] = useState(() => new Map()) // slideKey → [{id, text, x, y, size, color, curve}]
   const [freeformPos, setFreeformPos] = useState(() => new Map()) // photoId → {x, y} on a freeform slide
+  const [insets, setInsets] = useState(() => new Map()) // photoId → {x, y}: floats above its slide's collage
   const [textEdit, setTextEdit] = useState(null) // {slideKey, textId, x, y} — text box editor
   const [moreEdit, setMoreEdit] = useState(null) // {slideKey} — mobile ⋯ action sheet
   const [showHints, setShowHints] = useState(false) // first-run coach marks
@@ -275,6 +276,7 @@ export default function App() {
         }
       setTextBoxes(restoredTexts)
       setFreeformPos(new Map(workspace.freeformPos ?? []))
+      setInsets(new Map(workspace.insets ?? []))
       setImportState(null)
       setRestoring(false)
     })()
@@ -311,11 +313,12 @@ export default function App() {
         captions: [...captions],
         textBoxes: [...textBoxes],
         freeformPos: [...freeformPos],
+        insets: [...insets],
         savedAt: Date.now(),
       })
     }, 800)
     return () => clearTimeout(t)
-  }, [restoring, photos, slides, tray, perSlide, gutter, bgMode, look, tilt, cornerRadius, aspect, customAspect, borderW, borderColor, borderStyle, lookStrength, exportFormat, exportSize, meshSeams, sizeBoosts, slideTemplates, captions, textBoxes, freeformPos])
+  }, [restoring, photos, slides, tray, perSlide, gutter, bgMode, look, tilt, cornerRadius, aspect, customAspect, borderW, borderColor, borderStyle, lookStrength, exportFormat, exportSize, meshSeams, sizeBoosts, slideTemplates, captions, textBoxes, freeformPos, insets])
 
   // Per-photo pan: nudge the crop's focal point inside its cell. The photo
   // object carries the new focal (so previews, exports, and the stored
@@ -463,6 +466,13 @@ export default function App() {
       })
       return next
     })
+    setInsets((prev) => {
+      const next = new Map(prev)
+      orig.photoIds.forEach((id, j) => {
+        if (prev.has(id)) next.set(clones[j].id, { ...prev.get(id) })
+      })
+      return next
+    })
   }
 
   // Start over: wipe the stored session and the workspace together.
@@ -480,6 +490,7 @@ export default function App() {
     setCaptions(new Map())
     setTextBoxes(new Map())
     setFreeformPos(new Map())
+    setInsets(new Map())
     setNotice(null)
     setSkipped([])
     setOptionsOpen(false)
@@ -588,16 +599,19 @@ export default function App() {
       const n = members.length
       const groupW = n * canvasW
       const allIds = members.flatMap((s) => s.photoIds)
-      const eff = effectiveQualities(allIds, (id) => photos.get(id))
-      // tap-to-resize: a boosted photo pulls a matching share of the canvas
-      const boosts = allIds.map((id) => sizeBoosts.get(id) ?? 1)
-      const quals = allIds.map((id) => eff.get(id) ?? 0.5)
       // a pinned template wins over the BSP engine on a solo slide — merged
       // groups always compose freely across the full width
       const pinned = n === 1 ? slideTemplates.get(members[0].key) : null
       const isFree = pinned === FREEFORM
+      // inset photos float above the collage, so the flow layout skips them
+      // (freeform slides place everything absolutely — insets are moot there)
+      const flowIds = isFree ? allIds : allIds.filter((id) => !insets.has(id))
+      const eff = effectiveQualities(flowIds, (id) => photos.get(id))
+      // tap-to-resize: a boosted photo pulls a matching share of the canvas
+      const boosts = flowIds.map((id) => sizeBoosts.get(id) ?? 1)
+      const quals = flowIds.map((id) => eff.get(id) ?? 0.5)
       const tpl = pinned && !isFree ? templateById(pinned) : null
-      const usingTpl = tpl && tpl.count === allIds.length
+      const usingTpl = tpl && tpl.count === flowIds.length
       const seed = members.reduce((a, s) => (Math.imul(a, 31) + s.seed) >>> 0, 17)
       const opts = {
         canvasW: groupW,
@@ -611,7 +625,7 @@ export default function App() {
       // per-group cache: dragging one photo's size slider only relays out
       // the group that actually changed
       const cacheKey = JSON.stringify([
-        members.map((s) => s.key), allIds, boosts, quals, groupW, canvasH, margin, gutter, seed, usingTpl && tpl.id,
+        members.map((s) => s.key), flowIds, boosts, quals, groupW, canvasH, margin, gutter, seed, usingTpl && tpl.id,
         isFree && allIds.map((id) => freeformPos.get(id) ?? null),
       ])
       const inner =
@@ -632,21 +646,39 @@ export default function App() {
             }
           : usingTpl
             ? { rects: templateRects(tpl, { canvasW: groupW, canvasH, margin, gutter }), seed }
-            : computeLayout(allIds.map((id) => photos.get(id)?.aspect ?? 1), opts))
+            : computeLayout(flowIds.map((id) => photos.get(id)?.aspect ?? 1), opts))
       nextCache.set(cacheKey, inner)
-      // user-dragged reorders: the two photos' rects trade places
-      const groupRects = allIds.map((_, j) => inner.rects[j] ?? null)
+      // stitch flow cells and floating insets back into photo order; insets
+      // sit in their own slide's window, sized by the tap slider
+      const rectByFlow = new Map(flowIds.map((id, j) => [id, inner.rects[j] ?? null]))
+      const memberOf = new Map()
+      members.forEach((s, k) => s.photoIds.forEach((id) => memberOf.set(id, k)))
+      const groupRects = allIds.map((id) => {
+        if (!isFree && insets.has(id)) {
+          const pos = insets.get(id)
+          const a = photos.get(id)?.aspect ?? 1
+          const w = Math.min(canvasW * 0.62, canvasW * 0.3 * (sizeBoosts.get(id) ?? 1))
+          const h = Math.min(canvasH * 0.62, w / a)
+          const k = memberOf.get(id) ?? 0
+          return { x: k * canvasW + pos.x * canvasW - w / 2, y: pos.y * canvasH - h / 2, w, h, pip: true }
+        }
+        return rectByFlow.get(id) ?? null
+      })
       for (const s of members) {
         for (const [a, b] of s.swaps ?? []) {
           const ia = allIds.indexOf(a)
           const ib = allIds.indexOf(b)
-          if (ia >= 0 && ib >= 0 && groupRects[ia] && groupRects[ib]) {
+          if (ia >= 0 && ib >= 0 && groupRects[ia] && groupRects[ib] && !groupRects[ia].pip && !groupRects[ib].pip) {
             const t = groupRects[ia]
             groupRects[ia] = groupRects[ib]
             groupRects[ib] = t
           }
         }
       }
+      // draw order: flow cells first, floating insets on top of everything
+      const drawOrder = allIds
+        .map((_, j) => j)
+        .sort((a, b) => (groupRects[a]?.pip ? 1 : 0) - (groupRects[b]?.pip ? 1 : 0))
       members.forEach((s, k) => {
         const offsetX = k * canvasW
         // every group cell in this slide's local space — cells crossing the
@@ -655,7 +687,8 @@ export default function App() {
         const drawIds = []
         const drawRects = []
         const slack = canvasW * 0.1 // tilt rotation can poke past a cell
-        allIds.forEach((id, j) => {
+        drawOrder.forEach((j) => {
+          const id = allIds[j]
           const r = groupRects[j]
           if (!r) return
           const local = { ...r, x: r.x - offsetX }
@@ -674,7 +707,7 @@ export default function App() {
     }
     layoutCache.current = nextCache
     return result
-  }, [slides, photos, canvasW, canvasH, margin, gutter, meshGroups, sizeBoosts, slideTemplates, freeformPos])
+  }, [slides, photos, canvasW, canvasH, margin, gutter, meshGroups, sizeBoosts, slideTemplates, freeformPos, insets])
 
   const toggleSeam = (i) => {
     const key = seamKey(i)
@@ -1006,7 +1039,7 @@ export default function App() {
   // objects are treated as immutable (edits like nudges replace them), so a
   // snapshot is a handful of container copies, not a deep clone.
   const stateRef = useRef(null)
-  stateRef.current = { photos, slides, tray, meshSeams, sizeBoosts, slideTemplates, captions, textBoxes, freeformPos }
+  stateRef.current = { photos, slides, tray, meshSeams, sizeBoosts, slideTemplates, captions, textBoxes, freeformPos, insets }
   const history = useRef({ past: [], future: [], lastTag: '', lastAt: 0 })
   const [historyTick, setHistoryTick] = useState(0)
 
@@ -1020,6 +1053,7 @@ export default function App() {
     captions: new Map(stateRef.current.captions),
     textBoxes: new Map(stateRef.current.textBoxes),
     freeformPos: new Map(stateRef.current.freeformPos),
+    insets: new Map(stateRef.current.insets),
   })
 
   // call BEFORE mutating; same-tag pushes within a second coalesce, so a
@@ -1058,6 +1092,7 @@ export default function App() {
     setCaptions(s.captions)
     setTextBoxes(s.textBoxes)
     setFreeformPos(s.freeformPos)
+    setInsets(s.insets)
   }
 
   const undo = () => {
@@ -1140,7 +1175,9 @@ export default function App() {
     // its own canvas (like a text box) instead of relocating it. "To shelf"
     // in the tap popover and the steppers still move photos out.
     const freeOwner = slidesRef.current.find((s) => s.photoIds.includes(photoId))
-    if (freeOwner && slideTemplates.get(freeOwner.key) === FREEFORM && !trayRef.current.includes(photoId)) {
+    const ownerIsFree = freeOwner && slideTemplates.get(freeOwner.key) === FREEFORM
+    const floating = ownerIsFree || (freeOwner && insets.has(photoId))
+    if (floating && !trayRef.current.includes(photoId)) {
       const box = e.target.getBoundingClientRect?.()
       if (box) {
         const start = { x: e.clientX, y: e.clientY }
@@ -1156,7 +1193,8 @@ export default function App() {
           pushHistory(`fmove:${photoId}`)
           const x = Math.min(0.96, Math.max(0.04, (ev.clientX - box.left) / box.width))
           const y = Math.min(0.96, Math.max(0.04, (ev.clientY - box.top) / box.height))
-          setFreeformPos((prev) => new Map(prev).set(photoId, { x, y }))
+          const place = ownerIsFree ? setFreeformPos : setInsets
+          place((prev) => new Map(prev).set(photoId, { x, y }))
         }
         const onUp = (ev) => {
           cleanupFree()
@@ -2289,6 +2327,8 @@ export default function App() {
             <button className="chip" onClick={() => resetPhotoEdits(sizeEdit.photoId)}>
               Reset
             </button>
+          </div>
+          <div className="size-popover-row">
             <button
               className="chip"
               title="Park this photo on the playground shelf"
@@ -2299,6 +2339,35 @@ export default function App() {
             >
               To shelf
             </button>
+            {(() => {
+              const owner = slides.find((s) => s.photoIds.includes(sizeEdit.photoId))
+              if (!owner || slideTemplates.get(owner.key) === FREEFORM) return null
+              const isInset = insets.has(sizeEdit.photoId)
+              const others = owner.photoIds.filter((id) => !insets.has(id)).length
+              return (
+                <button
+                  className="chip"
+                  disabled={!isInset && others < 2}
+                  title={
+                    isInset
+                      ? 'Tuck the photo back into the collage grid'
+                      : 'Float this photo above the collage — drag it anywhere'
+                  }
+                  onClick={() => {
+                    pushHistory()
+                    haptics.select()
+                    setInsets((prev) => {
+                      const next = new Map(prev)
+                      if (isInset) next.delete(sizeEdit.photoId)
+                      else next.set(sizeEdit.photoId, { x: 0.76, y: 0.76 })
+                      return next
+                    })
+                  }}
+                >
+                  {isInset ? 'Un-float' : 'Float'}
+                </button>
+              )
+            })()}
           </div>
           <span className="control-label">Position</span>
           <div className="size-popover-row nudge-row">
