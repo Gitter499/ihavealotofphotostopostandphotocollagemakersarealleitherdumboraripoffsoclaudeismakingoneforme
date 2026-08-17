@@ -1319,6 +1319,60 @@ body[data-dragging='1'] .mesh-link {
   border-color: rgba(10, 132, 255, 0.6);
 }
 
+/* ---------- first-run coach marks ---------- */
+
+.hints-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: rgba(0, 0, 0, 0.55);
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+}
+
+.hints-card {
+  width: min(430px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border-radius: var(--radius-2xl);
+}
+
+.hint-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  color: var(--label-primary);
+  font-size: var(--text-subhead);
+  line-height: 1.4;
+}
+
+.hint-row svg {
+  flex: 0 0 auto;
+  color: var(--system-teal);
+  margin-top: 1px;
+}
+
+.hints-done {
+  align-self: center;
+  margin-top: var(--space-2);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hints-card {
+    animation: sheet-up 360ms var(--ease-spring);
+  }
+}
+
+@media (max-width: 640px) {
+  .hints-scrim {
+    place-items: end center;
+    padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+  }
+}
+
 /* ---------- action sheet (mobile ⋯ menu) ---------- */
 
 .action-sheet {
