@@ -1137,6 +1137,15 @@ body[data-dragging='1'] .mesh-link {
   color: var(--label-secondary);
 }
 
+/* a dragged photo hovering the skeleton: this drop starts a new slide */
+.add-slide.drop-target {
+  border-color: rgba(10, 132, 255, 0.75);
+  border-style: solid;
+  color: var(--label-primary);
+  background: rgba(10, 132, 255, 0.1);
+  box-shadow: 0 0 24px rgba(10, 132, 255, 0.18);
+}
+
 .add-slide:active {
   transform: scale(0.98);
 }

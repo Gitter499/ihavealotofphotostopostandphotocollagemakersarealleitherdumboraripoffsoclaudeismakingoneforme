@@ -670,25 +670,29 @@ export default function App() {
 
   // ---- playground: a shelf where photos sit out of every slide ----
   const TRAY_KEY = '__tray__'
+  const ADD_KEY = '__new__' // dropping on the add-slide skeleton births a slide
 
   // Move a photo anywhere: slide → slide, slide → playground, playground →
-  // slide. A drained source slide folds away, but deliberately added empty
-  // slides stay put, waiting for photos.
+  // slide, or onto the add-slide card to start a fresh slide with it. A
+  // drained source slide folds away, but deliberately added empty slides
+  // stay put, waiting for photos.
   const relocatePhoto = (photoId, toKey) => {
     const fromKey = slidesRef.current.find((s) => s.photoIds.includes(photoId))?.key ?? TRAY_KEY
     if (fromKey === toKey) return
+    if (toKey === ADD_KEY && slidesRef.current.length >= MAX_SLIDES) return
     haptics.select()
     setTray((prev) => (toKey === TRAY_KEY ? [...prev, photoId] : prev.filter((id) => id !== photoId)))
-    setSlides((prev) =>
-      prev
+    setSlides((prev) => {
+      const next = prev
         .map((s) => {
           if (s.key === fromKey)
             return { ...s, photoIds: s.photoIds.filter((id) => id !== photoId), seed: randomSeed() }
           if (s.key === toKey) return { ...s, photoIds: [...s.photoIds, photoId], seed: randomSeed() }
           return s
         })
-        .filter((s) => s.photoIds.length > 0 || s.key !== fromKey),
-    )
+        .filter((s) => s.photoIds.length > 0 || s.key !== fromKey)
+      return toKey === ADD_KEY ? [...next, { key: `s${slideKeyCounter++}`, photoIds: [photoId], seed: randomSeed() }] : next
+    })
   }
 
   // hand every parked photo back, each to whichever slide is emptiest
@@ -742,7 +746,11 @@ export default function App() {
       }
       const el = document.elementFromPoint(ev.clientX, ev.clientY)
       const card = el?.closest?.('[data-slide-key]')
-      const overKey = el?.closest?.('.playground') ? TRAY_KEY : (card?.dataset.slideKey ?? null)
+      const overKey = el?.closest?.('.playground')
+        ? TRAY_KEY
+        : el?.closest?.('.add-slide')
+          ? ADD_KEY
+          : (card?.dataset.slideKey ?? null)
       setDrag((d) => (d ? { ...d, x: ev.clientX, y: ev.clientY, overKey } : d))
     }
     const onUp = (ev) => {
@@ -763,6 +771,8 @@ export default function App() {
         const ownerKey = slidesRef.current.find((s) => s.photoIds.includes(photoId))?.key ?? slideKey
         if (el?.closest?.('.playground')) {
           relocatePhoto(photoId, TRAY_KEY)
+        } else if (el?.closest?.('.add-slide')) {
+          relocatePhoto(photoId, ADD_KEY)
         } else if (toKey && (fromTray || toKey !== ownerKey)) {
           relocatePhoto(photoId, toKey)
         } else if (toKey === ownerKey && !fromTray) {
@@ -1164,11 +1174,15 @@ export default function App() {
               </div>
             ))}
             {slides.length < MAX_SLIDES && !busyImporting && (
-              <button className="add-slide" onClick={addEmptySlide} aria-label="Add slide">
+              <button
+                className={`add-slide ${drag?.overKey === ADD_KEY ? 'drop-target' : ''}`}
+                onClick={addEmptySlide}
+                aria-label="Add slide"
+              >
                 <span className="add-slide-plus" aria-hidden="true">
                   +
                 </span>
-                <span className="add-slide-hint">New slide</span>
+                <span className="add-slide-hint">{drag ? 'Drop for a new slide' : 'New slide'}</span>
               </button>
             )}
           </div>

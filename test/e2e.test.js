@@ -400,6 +400,42 @@ try {
   assert.notEqual(preSwap, postSwap, 'within-slide drag did not reorder photos')
   console.log('  ok  dragging a photo within a slide swaps positions')
 
+  // dropping a photo on the add-slide skeleton births a new slide holding it
+  await page.locator('.add-slide').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(300)
+  const newSlideCounts = () =>
+    page.evaluate(() => [...document.querySelectorAll('.slide-count')].map((el) => parseInt(el.textContent, 10)))
+  const beforeBirth = await newSlideCounts()
+  const lastCanvas = await page.locator('.slide-canvas').last().boundingBox()
+  const addBox = await page.locator('.add-slide').boundingBox()
+  await page.mouse.move(lastCanvas.x + lastCanvas.width * 0.5, lastCanvas.y + lastCanvas.height * 0.5)
+  await page.mouse.down()
+  await page.mouse.move(addBox.x + addBox.width / 2, addBox.y + addBox.height / 2, { steps: 12 })
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  const afterBirth = await newSlideCounts()
+  assert.equal(afterBirth.length, beforeBirth.length + 1, 'drop on the skeleton should add a slide')
+  assert.equal(afterBirth[afterBirth.length - 1], 1, 'the new slide should hold exactly the dropped photo')
+  assert.equal(
+    afterBirth.reduce((a, b) => a + b, 0),
+    beforeBirth.reduce((a, b) => a + b, 0),
+    'no photo may be dropped on the floor',
+  )
+  // put it back: drag from the new last slide onto its neighbour
+  await page.locator('.add-slide').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(300)
+  const babyBox = await page.locator('.slide-canvas').last().boundingBox()
+  const prevBox = await page.locator('.slide-canvas').nth(beforeBirth.length - 1).boundingBox()
+  await page.mouse.move(babyBox.x + babyBox.width / 2, babyBox.y + babyBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(prevBox.x + prevBox.width / 2, prevBox.y + prevBox.height / 2, { steps: 12 })
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  assert.deepEqual((await newSlideCounts()).length, beforeBirth.length, 'returning the photo should fold the new slide')
+  await page.locator('.slide-canvas').first().scrollIntoViewIfNeeded() // leave the strip where the next test expects it
+  await page.waitForTimeout(200)
+  console.log('  ok  dropping a photo on the add-slide skeleton starts a new slide with it')
+
   // playground: park a photo on the shelf, remix around it, bring it back
   await page.locator('.playground').scrollIntoViewIfNeeded()
   await page.waitForTimeout(300)
