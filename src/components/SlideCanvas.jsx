@@ -24,17 +24,29 @@ export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, b
     if (canvas.height !== bh) canvas.height = bh
     const ctx = canvas.getContext('2d')
     const images = new Map()
-    for (const id of slide.photoIds) {
+    const neededIds = [...slide.photoIds, ...(layout.bridges ?? []).map((b) => b.id)]
+    for (const id of neededIds) {
       const p = photos.get(id)
       const bmp = imagesOverride?.get(id) ?? p?.previewBitmap
       if (bmp) images.set(id, bmp)
     }
     const draw = (rects, progressOf) => {
       ctx.setTransform(scale, 0, 0, scale, 0, 0)
-      drawSlide(ctx, { width: canvasW, height: canvasH, bg, photoIds: slide.photoIds, rects, images, progressOf, tilt, radius })
+      drawSlide(ctx, {
+        width: canvasW,
+        height: canvasH,
+        bg,
+        photoIds: slide.photoIds,
+        rects,
+        images,
+        progressOf,
+        tilt,
+        radius,
+        bridges: layout.bridges ?? [],
+      })
       // remember what is actually on screen so an interrupted morph
       // continues from where it is instead of jumping
-      shownRects.current = new Map(slide.photoIds.map((id, i) => [id, rects[i]]))
+      shownRects.current = new Map(slide.photoIds.map((id, i) => [id, rects[i]]).filter(([, r]) => r))
     }
 
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -42,7 +54,8 @@ export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, b
     lastAnimKey.current = animKey
 
     const prev = shownRects.current
-    const canMorph = prev && slide.photoIds.every((id) => prev.has(id))
+    const morphIds = slide.photoIds.filter((_, i) => layout.rects[i])
+    const canMorph = prev && morphIds.length > 0 && morphIds.every((id) => prev.has(id))
     let raf
 
     if (reduced || !keyChanged) {
@@ -52,12 +65,12 @@ export default function SlideCanvas({ slide, layout, photos, canvasW, canvasH, b
 
     if (canMorph) {
       // FLIP: interpolate every photo from where it was to where it belongs
-      const from = slide.photoIds.map((id) => prev.get(id))
+      const from = slide.photoIds.map((id) => prev.get(id) ?? null)
       const t0 = performance.now()
       const tick = (t) => {
         const raw = Math.min(1, (t - t0) / MORPH_MS)
         const e = easeOut(raw)
-        draw(slide.photoIds.map((_, i) => lerpRect(from[i], layout.rects[i], e)))
+        draw(slide.photoIds.map((_, i) => (from[i] && layout.rects[i] ? lerpRect(from[i], layout.rects[i], e) : layout.rects[i])))
         if (raw < 1) raf = requestAnimationFrame(tick)
       }
       raf = requestAnimationFrame(tick)

@@ -16,6 +16,7 @@ import { exportAllAsZip, renderSlideBlob, slideFileName, saveBlob } from './lib/
 import { randomSeed } from './lib/rng.js'
 import SlideCanvas from './components/SlideCanvas.jsx'
 import Logo from './components/Logo.jsx'
+import Wordmark from './components/Wordmark.jsx'
 import {
   ImagesIcon,
   ShuffleIcon,
@@ -47,6 +48,7 @@ export default function App() {
   const [look, setLook] = useState('auto')
   const [tilt, setTilt] = useState(0) // degrees of per-photo lean
   const [cornerRadius, setCornerRadius] = useState(0)
+  const [mesh, setMesh] = useState(false) // bridge photos across slide seams
   const [aspect, setAspect] = useState('4:5')
   const [importState, setImportState] = useState(null) // {done, total}
   const [skipped, setSkipped] = useState([])
@@ -145,39 +147,79 @@ export default function App() {
 
   const handleAspect = (a) => setAspect(a)
 
-  const layouts = useMemo(
-    () =>
-      slides.map((s) => {
-        const eff = effectiveQualities(s.photoIds, (id) => photos.get(id))
-        const layout = computeLayout(
-          s.photoIds.map((id) => photos.get(id)?.aspect ?? 1),
-          {
-            canvasW,
-            canvasH,
-            margin,
-            gutter,
-            baseSeed: s.seed,
-            qualities: s.photoIds.map((id) => eff.get(id) ?? 0.5),
-          },
-        )
-        // user-dragged reorders: the two photos' rects trade places
-        if (s.swaps?.length) {
-          const rects = [...layout.rects]
-          for (const [a, b] of s.swaps) {
-            const ia = s.photoIds.indexOf(a)
-            const ib = s.photoIds.indexOf(b)
-            if (ia >= 0 && ib >= 0) {
-              const t = rects[ia]
-              rects[ia] = rects[ib]
-              rects[ib] = t
-            }
+  const BRIDGE_STRIP = 300 // width (in 1080-space) each slide gives to a seam photo
+
+  const layouts = useMemo(() => {
+    // Mesh planning: for each seam between adjacent filled slides, pick a
+    // boundary photo (the more portrait of the pair's tail/head) to span it.
+    const bridgeAfter = new Array(slides.length).fill(null) // seam i → {id, owner}
+    if (mesh) {
+      const used = new Set()
+      for (let i = 0; i < slides.length - 1; i++) {
+        const a = slides[i]
+        const b = slides[i + 1]
+        if (a.photoIds.length === 0 || b.photoIds.length === 0) continue
+        const tail = a.photoIds[a.photoIds.length - 1]
+        const head = b.photoIds[0]
+        const candidates = [
+          { id: tail, owner: i },
+          { id: head, owner: i + 1 },
+        ].filter((c) => !used.has(c.id))
+        if (candidates.length === 0) continue
+        candidates.sort((x, y) => (photos.get(x.id)?.aspect ?? 1) - (photos.get(y.id)?.aspect ?? 1))
+        bridgeAfter[i] = candidates[0]
+        used.add(candidates[0].id)
+      }
+    }
+
+    return slides.map((s, i) => {
+      const leftBridge = i > 0 ? bridgeAfter[i - 1] : null
+      const rightBridge = bridgeAfter[i]
+      const leftStrip = leftBridge ? BRIDGE_STRIP : 0
+      const rightStrip = rightBridge ? BRIDGE_STRIP : 0
+      const ownedBridgeIds = new Set(
+        [leftBridge, rightBridge].filter((b) => b && b.owner === i).map((b) => b.id),
+      )
+      const innerIds = s.photoIds.filter((id) => !ownedBridgeIds.has(id))
+      const eff = effectiveQualities(innerIds, (id) => photos.get(id))
+      const inner = computeLayout(
+        innerIds.map((id) => photos.get(id)?.aspect ?? 1),
+        {
+          canvasW: canvasW - leftStrip - rightStrip,
+          canvasH,
+          margin,
+          gutter,
+          baseSeed: s.seed,
+          qualities: innerIds.map((id) => eff.get(id) ?? 0.5),
+        },
+      )
+      const rectById = new Map(
+        innerIds.map((id, j) => [
+          id,
+          inner.rects[j] ? { ...inner.rects[j], x: inner.rects[j].x + leftStrip } : null,
+        ]),
+      )
+      let rects = s.photoIds.map((id) => rectById.get(id) ?? null)
+      // user-dragged reorders: the two photos' rects trade places
+      if (s.swaps?.length) {
+        rects = [...rects]
+        for (const [a, b] of s.swaps) {
+          const ia = s.photoIds.indexOf(a)
+          const ib = s.photoIds.indexOf(b)
+          if (ia >= 0 && ib >= 0 && rects[ia] && rects[ib]) {
+            const t = rects[ia]
+            rects[ia] = rects[ib]
+            rects[ib] = t
           }
-          return { ...layout, rects }
         }
-        return layout
-      }),
-    [slides, photos, canvasW, canvasH, margin, gutter],
-  )
+      }
+      const bridges = []
+      if (leftBridge) bridges.push({ id: leftBridge.id, rect: { x: 0, y: 0, w: leftStrip, h: canvasH }, half: 'right' })
+      if (rightBridge)
+        bridges.push({ id: rightBridge.id, rect: { x: canvasW - rightStrip, y: 0, w: rightStrip, h: canvasH }, half: 'left' })
+      return { ...inner, rects, bridges }
+    })
+  }, [slides, photos, canvasW, canvasH, margin, gutter, mesh])
 
   const layoutsRef = useRef(layouts)
   layoutsRef.current = layouts
@@ -413,7 +455,7 @@ export default function App() {
     }
   }
   const downloadOne = async (i) => {
-    const blob = await renderSlideBlob(slides[i], layouts[i].rects, photos, {
+    const blob = await renderSlideBlob(slides[i], layouts[i], photos, {
       ...exportOpts,
       bg: slideBgs[i],
       look,
@@ -443,7 +485,7 @@ export default function App() {
       <header className="topbar glass-thick">
         <div className="brand">
           <Logo size={18} />
-          <span className="brand-name">photogram</span>
+          <Wordmark height={15} />
         </div>
         {hasPhotos && (
           <div className="counts" aria-live="polite">
@@ -729,6 +771,17 @@ export default function App() {
                     {a}
                   </button>
                 ))}
+              </div>
+            </div>
+            <div className="control">
+              <span className="control-label">Mesh</span>
+              <div className="segmented" role="group" aria-label="Mesh slides">
+                <button className={mesh ? '' : 'active'} onClick={() => setMesh(false)}>
+                  Off
+                </button>
+                <button className={mesh ? 'active' : ''} onClick={() => setMesh(true)} title="Photos flow across slide seams">
+                  On
+                </button>
               </div>
             </div>
         </div>

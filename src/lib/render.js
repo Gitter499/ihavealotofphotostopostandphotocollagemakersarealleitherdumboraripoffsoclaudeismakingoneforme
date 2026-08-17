@@ -68,12 +68,40 @@ export function drawCover(ctx, img, rect, { progress = 1, spin = 0, angle = 0, r
   ctx.restore()
 }
 
+// A bridge photo spans the seam between two slides: its crop continues
+// pixel-perfectly from the right strip of one slide into the left strip of
+// the next, so swiping the carousel reads as one continuous image.
+// `half` picks which half of the combined crop this slide shows. Bridges are
+// drawn edge-to-edge, without tilt or rounding — the seam must touch.
+export function drawBridge(ctx, img, rect, half) {
+  const iw = img.width
+  const ih = img.height
+  if (!iw || !ih || rect.w <= 0 || rect.h <= 0) return
+  const combinedAspect = (rect.w * 2) / rect.h
+  const pa = iw / ih
+  let sw, sh
+  if (pa > combinedAspect) {
+    sh = ih
+    sw = ih * combinedAspect
+  } else {
+    sw = iw
+    sh = iw / combinedAspect
+  }
+  const sx = (iw - sw) / 2 + (half === 'right' ? sw / 2 : 0)
+  const sy = (ih - sh) / 2
+  ctx.drawImage(img, sx, sy, sw / 2, sh, rect.x, rect.y, rect.w, rect.h)
+}
+
 // slide: { photoIds }, rects aligned with photoIds, images: Map id → drawable.
 // progressOf: optional (index) → 0..1 for the compose animation.
 // tilt (deg) leans each photo by its deterministic angle; radius rounds corners.
-export function drawSlide(ctx, { width, height, bg, photoIds, rects, images, progressOf, tilt = 0, radius = 0 }) {
+export function drawSlide(ctx, { width, height, bg, photoIds, rects, images, progressOf, tilt = 0, radius = 0, bridges = [] }) {
   ctx.fillStyle = bg
   ctx.fillRect(0, 0, width, height)
+  for (const b of bridges) {
+    const img = images.get(b.id)
+    if (img) drawBridge(ctx, img, b.rect, b.half)
+  }
   for (let i = 0; i < photoIds.length; i++) {
     const rect = rects[i]
     const img = images.get(photoIds[i])

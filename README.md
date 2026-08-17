@@ -8,6 +8,7 @@ Everything runs in your browser. Photos never leave your device.
 
 ![the app](docs/screen-desktop.png)
 ![tilt and rounded corners](docs/screen-scrapbook.png)
+<img src="docs/screen-mobile.png" width="300" alt="on a phone">
 
 ## What it does
 
@@ -17,6 +18,7 @@ Everything runs in your browser. Photos never leave your device.
 - Nudges similar colours onto the same slide.
 - Filters with live preview bubbles, and an Off switch when they miss.
 - Tilt, rounded corners, gutter width, 4:5 or 1:1.
+- Mesh mode: a photo can run across two slides, so the carousel swipes as one continuous strip.
 - Drag photos between slides or within one. Add, delete, reorder slides. Set any slide's photo count.
 - Exports numbered 1440×1800 JPEGs in a zip, ready to post in order.
 

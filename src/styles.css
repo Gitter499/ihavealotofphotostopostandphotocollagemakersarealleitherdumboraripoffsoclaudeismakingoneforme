@@ -233,11 +233,12 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-family: var(--font-display);
-  font-size: var(--text-title3);
-  font-weight: 750;
-  letter-spacing: -0.015em;
   white-space: nowrap;
+}
+
+.brand svg[role='img'] {
+  display: block;
+  color: var(--label-primary);
 }
 
 .brand-mark {

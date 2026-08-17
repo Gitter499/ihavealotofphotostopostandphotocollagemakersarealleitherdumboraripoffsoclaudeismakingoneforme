@@ -377,8 +377,38 @@ try {
   assert.notEqual(plain, styled, 'tilt/corners did not change the render')
   await page.locator('input[type="range"]').nth(2).fill('0')
   await page.locator('input[type="range"]').nth(3).fill('0')
-  await closeOptions()
   console.log('  ok  tilt and corner sliders restyle the slides')
+
+  // mesh: a photo flows across the seam between adjacent slides
+  const meshBefore = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  await page.locator('[aria-label="Mesh slides"]').getByRole('button', { name: 'On' }).click()
+  await page.waitForTimeout(900)
+  const meshOn = await page.evaluate(() => document.querySelector('.slide-canvas').toDataURL())
+  assert.notEqual(meshBefore, meshOn, 'mesh did not change the render')
+  const seamDiff = await page.evaluate(() => {
+    const cs = [...document.querySelectorAll('.slide-canvas')]
+    const sample = (c, x) => {
+      const d = c.getContext('2d').getImageData(x, 0, 2, c.height).data
+      let r = 0
+      let g = 0
+      let b = 0
+      let n = 0
+      for (let i = 0; i < d.length; i += 4) {
+        r += d[i]
+        g += d[i + 1]
+        b += d[i + 2]
+        n++
+      }
+      return [r / n, g / n, b / n]
+    }
+    const a = sample(cs[0], cs[0].width - 2)
+    const b = sample(cs[1], 0)
+    return a.map((v, i) => Math.abs(v - b[i]))
+  })
+  assert.ok(Math.max(...seamDiff) < 30, `seam edges do not continue: ${seamDiff}`)
+  await page.locator('[aria-label="Mesh slides"]').getByRole('button', { name: 'Off' }).click()
+  await closeOptions()
+  console.log('  ok  mesh flows a photo across the slide seam (edge colours continue)')
 
   // 200-photo stress: import must complete and stay responsive
   const many = []

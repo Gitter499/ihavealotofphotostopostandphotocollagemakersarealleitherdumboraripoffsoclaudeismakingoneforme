@@ -34,11 +34,14 @@ async function decodeFiltered(photo, look) {
   return canvas
 }
 
-export async function renderSlideBlob(slide, rects, photosById, { width, height, bg, look, tilt = 0, radius = 0 }) {
+export async function renderSlideBlob(slide, layout, photosById, { width, height, bg, look, tilt = 0, radius = 0 }) {
   const images = new Map()
+  const rects = layout.rects
+  const bridges = layout.bridges ?? []
   try {
+    const neededIds = [...new Set([...slide.photoIds, ...bridges.map((b) => b.id)])]
     await Promise.all(
-      slide.photoIds.map(async (id) => {
+      neededIds.map(async (id) => {
         const photo = photosById.get(id)
         if (photo) images.set(id, await decodeFiltered(photo, look))
       }),
@@ -47,7 +50,7 @@ export async function renderSlideBlob(slide, rects, photosById, { width, height,
     const ctx = canvas.getContext('2d')
     ctx.imageSmoothingQuality = 'high'
     ctx.scale(EXPORT_SCALE, EXPORT_SCALE)
-    drawSlide(ctx, { width, height, bg, photoIds: slide.photoIds, rects, images, tilt, radius })
+    drawSlide(ctx, { width, height, bg, photoIds: slide.photoIds, rects, images, tilt, radius, bridges })
     return await canvas.convertToBlob({ type: 'image/jpeg', quality: EXPORT_QUALITY })
   } finally {
     for (const img of images.values()) img.close?.()
@@ -62,7 +65,7 @@ export async function exportAllAsZip(slides, layouts, photosById, { width, heigh
   const zip = new JSZip()
   for (let i = 0; i < slides.length; i++) {
     onProgress?.(i, slides.length)
-    const blob = await renderSlideBlob(slides[i], layouts[i].rects, photosById, {
+    const blob = await renderSlideBlob(slides[i], layouts[i], photosById, {
       width,
       height,
       bg: bgs[i],
