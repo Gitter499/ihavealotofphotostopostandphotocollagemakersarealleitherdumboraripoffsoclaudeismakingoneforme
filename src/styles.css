@@ -986,38 +986,74 @@ input[type='range']::-moz-range-thumb {
   transition:
     border-color var(--duration-fast) var(--ease-out),
     box-shadow var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-out);
+    transform var(--duration-fast) var(--ease-out),
+    margin-left var(--duration-fast) var(--ease-out),
+    padding var(--duration-fast) var(--ease-out),
+    border-radius var(--duration-fast) var(--ease-out);
 }
 
-/* playful pointer tilt — hover devices only, motion-gated */
+/* Playful pointer tilt — hover devices only, motion-gated. Applied only on
+   :hover so idle cards create no stacking context: a permanent transform
+   would let each card paint over the previous card's seam chip. */
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-  .slide-card {
+  .slide-card:hover {
     transform: perspective(900px) rotateY(var(--tilt-x, 0deg)) rotateX(var(--tilt-y, 0deg));
   }
 }
 
-/* meshed neighbours pull together and flatten their facing corners */
+/* Meshed neighbours fuse into one card: the gap, facing padding and facing
+   borders all collapse so the bridge photo runs unbroken across the seam.
+   A grey dotted rule marks where Instagram will cut the carousel. */
 .slide-card.mesh-join-right {
-  border-top-right-radius: 6px;
-  border-bottom-right-radius: 6px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-right: 0;
+  border-right-color: transparent;
 }
 
 .slide-card.mesh-join-left {
-  border-top-left-radius: 6px;
-  border-bottom-left-radius: 6px;
-  margin-left: calc(-1 * var(--space-2));
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding-left: 0;
+  border-left-color: transparent;
+  /* swallow the filmstrip gap plus both (now invisible) 1px borders */
+  margin-left: calc(-1 * var(--space-4) - 2px);
+}
+
+.slide-card.mesh-join-right .slide-canvas {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.slide-card.mesh-join-left .slide-canvas {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* the cut line: grey dotted, drawn by the right-hand card over the joint */
+.slide-card.mesh-join-left::before {
+  content: '';
+  position: absolute;
+  top: var(--space-2);
+  bottom: var(--space-2);
+  left: -1px;
+  width: 0;
+  border-left: 2px dotted rgba(190, 190, 200, 0.55);
+  pointer-events: none;
+  z-index: 4;
 }
 
 .mesh-link {
   position: absolute;
   top: 50%;
-  right: -23px;
+  left: -27px;
   transform: translateY(-50%);
   z-index: 5;
   transition:
     transform var(--duration-fast) var(--ease-spring),
     color var(--duration-fast) var(--ease-out),
-    opacity var(--duration-fast) var(--ease-out);
+    opacity var(--duration-fast) var(--ease-out),
+    left var(--duration-fast) var(--ease-out);
   width: 38px;
   height: 38px;
   display: flex;
@@ -1032,6 +1068,11 @@ input[type='range']::-moz-range-thumb {
 
 .mesh-link:active {
   transform: translateY(-50%) scale(0.94);
+}
+
+/* a fused seam has no gap — recentre the chip on the cut line */
+.slide-card.mesh-join-left > .mesh-link {
+  left: -19px;
 }
 
 /* meshed seam: bright, linked */

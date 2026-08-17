@@ -1323,19 +1323,22 @@ export default function App() {
                     onPhotoPointerDown={(e, photoId) => startPhotoDrag(e, slide.key, photoId)}
                   />
                 )}
-                {i < slides.length - 1 &&
+                {/* the chip for the seam BEFORE this card lives on this card:
+                    later cards paint above earlier ones (glass = stacking
+                    context), so the chip stays on top of a fused joint */}
+                {i > 0 &&
                   slide.photoIds.length > 0 &&
-                  slides[i + 1].photoIds.length > 0 &&
+                  slides[i - 1].photoIds.length > 0 &&
                   (() => {
-                    const meshed = meshSeams.has(seamKey(i))
+                    const meshed = meshSeams.has(seamKey(i - 1))
                     const Icon = meshed ? LinkSimpleIcon : LinkBreakIcon
                     return (
                       <button
                         className={`mesh-link glass-thick ${meshed ? 'mesh-link-on' : 'mesh-link-off'}`}
-                        onClick={() => toggleSeam(i)}
-                        onMouseEnter={() => setHoverSeam(i)}
+                        onClick={() => toggleSeam(i - 1)}
+                        onMouseEnter={() => setHoverSeam(i - 1)}
                         onMouseLeave={() => setHoverSeam(null)}
-                        onFocus={() => setHoverSeam(i)}
+                        onFocus={() => setHoverSeam(i - 1)}
                         onBlur={() => setHoverSeam(null)}
                         aria-pressed={meshed}
                         aria-label={meshed ? 'Unmesh these slides' : 'Mesh these slides'}
